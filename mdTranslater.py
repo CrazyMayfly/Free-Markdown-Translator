@@ -28,10 +28,11 @@ warnings_mapping = {
     'pt':'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
 }
 
-
+appendix = ['','.hk','.tw','']
 class GoogleTrans(object):
     def __init__(self):
-        self.url = 'https://translate.google.com.hk/translate_a/single'
+        # self.url = 'https://translate.google.com.hk/translate_a/single'
+        self.url = 'https://translate.google.com.fr/translate_a/single'
         self.TKK = "434674.96463358"  # 随时都有可能需要更新的TKK值
 
         self.header = {
@@ -65,8 +66,7 @@ class GoogleTrans(object):
         # self.update_TKK()
 
     def update_TKK(self):
-        url = "https://translate.google.cn/"
-        req = urllib.request.Request(url=url, headers=self.header)
+        req = urllib.request.Request(url=self.url, headers=self.header)
         page_source = urllib.request.urlopen(req).read().decode("utf-8")
         self.TKK = re.findall(r"tkk:'([0-9]+\.[0-9]+)'", page_source)[0]
 
