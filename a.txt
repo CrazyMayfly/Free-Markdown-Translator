@@ -1,0 +1,44 @@
+Begin
+"Windows configuration is the problem that the Ubuntu is not effective"
+""
+technology
+Operation and maintenance
+SSH
+Ubuntu
+Operation and maintenance
+SSH
+Ubuntu
+Windows configuration is free to entertain Ubuntu without taking effect
+
+cause
+
+During the configuration of my personal blog, I plan to use GitHub Action to automatically deploy, which needs to be used to use the SSH key to set aside.
+
+Reference link
+
+1.
+
+
+How to configure the SSH key to log in at Ubuntu 20.04
+2.
+
+
+Solution does not take effect after the success of SSH -free login configuration
+Configuration
+
+The blogger uses win10, ubuntu20.04;
+
+The process of configuration key is very simple. First of all
+
+Then use the `ssh-copy -d remote_username@server_ip_address` to deploy the public key to the remote server, but Windows generally does not have a` SSH-Copy-Id` command, so you can use the following command instead.
+
+After that, restart the SSH service, use the `SSH Remote_username@Server_IP_ADDDRESS` Connection to find that the password is still required. After checking the information, the link 2 is on the Linux platform and is not suitable for Windows. Best thought.
+
+Solution
+
+It is found that the OpenSSH AUTHENTINT AGENT item is not started. The description is clear, that is, it is used to verify the public and private key. After the service is turned on, the attempt is still unable to connect again.
+Finally, add config files in your .ssh directory
+
+Re -connect after saving and solve it perfectly!
+
+End

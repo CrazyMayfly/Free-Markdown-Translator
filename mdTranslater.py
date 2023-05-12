@@ -6,6 +6,7 @@ import json
 import os
 import re
 import ssl
+import sys
 import time
 import traceback
 import urllib.parse
@@ -24,7 +25,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 class GoogleTrans(object):
     def __init__(self):
-        self.url = 'https://transla te.google.com.hk/translate_a/single'
+        self.url = 'https://translate.google.com.hk/translate_a/single'
         self.TKK = "434674.96463358"  # 随时都有可能需要更新的TKK值
 
         self.header = {
@@ -115,6 +116,36 @@ class GoogleTrans(object):
             self.translate(sourceTxt, srcLang, targetLang, retries)
 
 
+class Node:
+    def __init__(self):
+        self.signs = ''
+        self.value = ''
+        self.trans_lines = 1
+
+    def get_trans_buff(self):
+        if self.trans_lines:
+            return self.value + '\n'
+        return None
+
+    def compose(self):
+        return self.value
+
+
+# 内容无需翻译
+class TransparentNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        self.value = line
+        self.trans_lines = 0
+
+
+# 内容全部需翻译
+# 比如MD中的正文文本块
+class SolidNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        self.value = line[0:-1]
+
 
 # 内容无需翻译
 # 比如 #date: 2022-04-01
@@ -161,6 +192,17 @@ class MdTransItemKeyValue(object):
             ':', ' ') + '\n'
 
 
+class KeyValueNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        idx = line.index(':')
+        self.signs = line[0: idx + 1]
+        self.value = line[idx + 1:].strip()
+
+    def compose(self):
+        return self.signs + ' ' + self.value
+
+
 # 内容为### Title形式，Title需要翻译
 class MdTransItemTitle(object):
     def __init__(self, line):
@@ -175,6 +217,18 @@ class MdTransItemTitle(object):
 
     def compose(self, translated_lines, start_pos):
         translated_lines[start_pos] = self.value + ' ' + translated_lines[start_pos].rstrip() + '\n'
+
+
+class TitleNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        idx = line.index(' ')
+        self.signs = line[0: idx]
+        self.value = line[idx + 1:-1]
+        print(self.value)
+
+    def compose(self):
+        return self.signs + " " + self.value
 
 
 # 内容为![图片标题](01.jpg) 形式，图片标题需要翻译
@@ -203,6 +257,66 @@ class MdTransItemImg(object):
             translated_lines[start_pos] = self.value + '  \n'
         elif self.type == 2:
             translated_lines[start_pos] = self.value1 + translated_lines[start_pos].rstrip() + self.value2 + '  \n'
+
+
+class ImageNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        idx1 = line.index('[')
+        idx2 = line.index(']')
+        if idx1 == idx2 - 1:
+            self.trans_lines = 0
+            self.value = line
+        else:
+            lstr = line[0: idx1 + 1]
+            mstr = line[idx1 + 1: idx2]
+            rstr = line[idx2: -1]
+            self.value = mstr
+            self.signs = []
+            self.signs.append(lstr)
+            self.signs.append(rstr)
+
+    def compose(self):
+        if self.trans_lines == 0:
+            return self.value
+        return self.value.join(self.signs)
+
+
+class LinkNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        pattern = r'\[.*?\]\(.*?\)'
+        p = re.compile(pattern)
+        text = p.split(line)
+        links = re.findall(pattern, line)
+        tips = []
+        self.signs = []
+        for link in links:
+            idx = link.index(']')
+            tips.append(link[1:idx])
+            self.signs.append(link[idx + 2:-2])
+        self.text_num = len(text)
+        self.link_num = len(links)
+        self.trans_lines = self.text_num + self.link_num
+        self.value = '\n'.join(text + tips)
+        # print(self.value)
+        # print(tips)
+        # print(self.signs)
+
+    def compose(self):
+        self.value = self.value.split('\n')
+        text = self.value[0:self.text_num]
+        tips = self.value[self.text_num:-1]
+        links = []
+        for i in range(0, self.link_num):
+            link = f'[{tips[i]}]({self.signs[i]})'
+            links.append(link)
+        results = []
+        for i in range(0, self.link_num):
+            results.append(text[i])
+            results.append(links[i])
+        results.append(text[-1])
+        return ''.join(results)
 
 
 # 内容为#key:["values1","values2",..."valueN"]形式，value需要翻译
@@ -236,6 +350,25 @@ class MdTransItemKeyValueArray(object):
             del translated_lines[start_pos + 1]
 
 
+class KeyValueArrayNode(Node):
+    def __init__(self, line):
+        super().__init__()
+        idx = line.index(':')
+        key = line[0: idx + 1]
+        self.signs = key
+        value = line[idx + 1:].strip()
+        if value.startswith('['):
+            items = value[2:-2].split('", "')
+            self.value = '\n'.join(items)
+            self.trans_lines = len(items)
+        else:
+            print("Wrong format with MdTransItemKeyValueArray:", text)
+
+    def compose(self):
+        items = self.value.split('\n')
+        return "{} [{}]".format(self.signs, '\",\"'.join(items))
+
+
 class MdTranslater():
     langs = ['en', 'zh-tw', 'th', 'hi', 'ms', 'tl', 'id', 'vi']
 
@@ -245,86 +378,147 @@ class MdTranslater():
             if not os.path.exists(dest_filename):
                 print('lack ', dest_filename)
 
-    def replace_useless_char(self, tstr):
-        return tstr
+    def translate(self, lines, src_lang, dest_lang):
+        tmp = ""
+        translated_text = ""
+        for line in lines:
+            tmp = tmp + line + '\n'
+            if len(tmp) > 500:  # 不同语言这个值不同
+                translated_text += GoogleTrans().translate(tmp, src_lang, dest_lang) + '\n'
+                tmp = ""
+        if len(tmp) > 0:
+            translated_text += GoogleTrans().translate(tmp, src_lang, dest_lang) + '\n'
+        return translated_text
 
-    def translate_md(self, src_lines, src_lang, dest_lang):
+    def get_nodes(self, src_lines):
         is_front_matter = False
         is_code_block = False
-        md_trans_items = []
+        nodes = []
         for i in range(len(src_lines)):
             line = src_lines[i]
             if line.strip() == '---':
                 is_front_matter = not is_front_matter
-                md_trans_items.append(MdTransItemReserve(line))
+                nodes.append(TransparentNode(line))
                 if not is_front_matter:
-                    md_trans_items.append(MdTransItemReserve(
+                    nodes.append(TransparentNode(
                         '> Warning: This page was generated by machine translation, please pay attention to the accuracy of the identification information!'))
                 continue
             if line.startswith('```'):
                 is_code_block = not is_code_block
-                md_trans_items.append(MdTransItemReserve(line))
+                nodes.append(TransparentNode(line))
                 continue
 
             if is_front_matter:
                 if line.startswith(('title:', 'description:')):
-                    md_trans_items.append(MdTransItemKeyValue(line))
+                    nodes.append(KeyValueNode(line))
                 elif line.startswith(('date:', 'slug:', 'toc', 'image')):
-                    md_trans_items.append(MdTransItemReserve(line))
+                    nodes.append(TransparentNode(line))
                 elif line.startswith(('tags:', 'categories:', 'keywords:')):
-                    md_trans_items.append(MdTransItemKeyValueArray(line))
-
+                    nodes.append(KeyValueArrayNode(line))
                 else:
-                    md_trans_items.append(MdTransItemPlainText(line))
+                    nodes.append(SolidNode(line))
             elif is_code_block:
-                md_trans_items.append(MdTransItemReserve(line))
+                nodes.append(TransparentNode(line))
             else:
                 if len(line.strip()) == 0:  # 空行
-                    md_trans_items.append(MdTransItemReserve(line))
-                elif re.match('.*\[.*\]\(.*\)', line) is not None:  # 图片和链接
-                    md_trans_items.append(MdTransItemImg(line))
-                    # md_trans_items.append(MdTransItemReserve(line))
+                    nodes.append(TransparentNode(line))
+                elif re.search('!\[.*?\]\(.*?\)', line) is not None:  # 图片
+                    nodes.append(ImageNode(line))
+                    # nodes.append(MdTransItemReserve(line))
+                elif re.search('\[.*?\]\(.*?\)', line) is not None:
+                    nodes.append(LinkNode(line))
                 elif line.strip().startswith('#'):  # 标题
-                    md_trans_items.append(MdTransItemTitle(line))
+                    nodes.append(TitleNode(line))
                 elif line.startswith('<audio') or line.startswith('<img '):
-                    md_trans_items.append(MdTransItemReserve(line))
+                    nodes.append(TransparentNode(line))
                 else:  # 普通文字
-                    md_trans_items.append(MdTransItemPlainText(line))
+                    nodes.append(SolidNode(line))
+        return nodes
 
+    def translate_md(self, src_lines, src_lang, dest_lang):
+        nodes = self.get_nodes(src_lines)
         # 待翻译md文本
-        src_md_text = 'BEGIN  \n'  ##在首尾都要加入特定行，否则翻译后会首尾的空行去掉，造成翻译前后对应不上
-        for mdTransItem in md_trans_items:
-            src_md_text = src_md_text + mdTransItem.get_trans_buff()
-        src_md_text = src_md_text + 'END  \n'  ##在首尾都要加入特定行，否则翻译后会首尾的空行去掉，造成翻译前后对应不上
-
+        src_md_text = 'BEGIN\n'
+        for node in nodes:
+            trans_buff = node.get_trans_buff()
+            if trans_buff:
+                src_md_text += trans_buff
+        src_md_text += 'END'
         print(src_md_text)
+        # sys.exit(0)
         # return
         # 分割文本，每次翻译，发送大小不大于2000
-        part_src_md_text = ""
-        dest_md_text = ""
         src_lines = src_md_text.splitlines()
-        # print('src_lines:', len(src_lines))
-        # print('src_lines:', src_lines)
-        for line in src_lines:
-            part_src_md_text = part_src_md_text + line + "\n"
-            if len(part_src_md_text) > 500:  # 不同语言这个值不同
-                dest_md_text = dest_md_text + GoogleTrans().translate(part_src_md_text, src_lang, dest_lang) + "\n"
-                part_src_md_text = ""
-        if len(part_src_md_text) > 0:
-            dest_md_text = dest_md_text + GoogleTrans().translate(part_src_md_text, src_lang, dest_lang) + "\n"
+        translated_text = self.translate(src_lines, src_lang, dest_lang)
+        #
+#         translated_text = '''Begin
+# "Windows configuration is the problem that the Ubuntu is not effective"
+# ""
+# technology
+# Operation and maintenance
+# SSH
+# Ubuntu
+# Operation and maintenance
+# SSH
+# Ubuntu
+# Windows configuration is free to entertain Ubuntu without taking effect
+#
+# cause
+#
+# During the configuration of my personal blog, I plan to use GitHub Action to automatically deploy, which needs to be used to use the SSH key to set aside.
+#
+# Reference link
+#
+# 1.
+#
+#
+# How to configure the SSH key to log in at Ubuntu 20.04
+# 2.
+#
+#
+# Solution does not take effect after the success of SSH -free login configuration
+# Configuration
+#
+# The blogger uses win10, ubuntu20.04;
+#
+# The process of configuration key is very simple. First of all
+#
+# Then use the `ssh-copy -d remote_username@server_ip_address` to deploy the public key to the remote server, but Windows generally does not have a` SSH-Copy-Id` command, so you can use the following command instead.
+#
+# After that, restart the SSH service, use the `SSH Remote_username@Server_IP_ADDDRESS` Connection to find that the password is still required. After checking the information, the link 2 is on the Linux platform and is not suitable for Windows. Best thought.
+#
+# Solution
+#
+# It is found that the OpenSSH AUTHENTINT AGENT item is not started. The description is clear, that is, it is used to verify the public and private key. After the service is turned on, the attempt is still unable to connect again.
+# Finally, add config files in your .ssh directory
+#
+# Re -connect after saving and solve it perfectly!
+#
+# End
+# '''
 
-        translated_lines = dest_md_text.splitlines()
-        # print(translated_lines)
+        translated_lines = translated_text.splitlines()
+        print(translated_lines)
         start_pos = 1  # 从第一行开始对应，首行为添加的无意义
-        for mdTransItem in md_trans_items:
-            # print(mdTransItem)
-            mdTransItem.compose(translated_lines, start_pos)
-            start_pos = start_pos + 1
+        for node in nodes:
+            node_trans_lines = node.trans_lines
+            if node_trans_lines == 0:
+
+                continue
+            elif node_trans_lines == 1:
+                node.value = translated_lines[start_pos]
+                start_pos += 1
+                print("signs: ", node.signs)
+                print("value: " + node.value)
+            else:
+                node.value = '\n'.join(translated_lines[start_pos:start_pos + node_trans_lines])
+                start_pos += node_trans_lines
 
         final_md_text = ''
-        for dline in translated_lines[1: -1]:
-            final_md_text = final_md_text + dline.rstrip() + '\n'
-
+        for node in nodes:
+            final_md_text += node.compose()
+        print(final_md_text)
+        sys.exit(0)
         return final_md_text
 
     def translate_md_folder(self, src_lang, dest_lang, md_folder):
