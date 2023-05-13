@@ -11,9 +11,9 @@ from cgitb import text
 
 # ssl._create_default_https_context = ssl._create_unverified_context
 warnings_mapping = {
+    'zh-tw': "警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！",
     'en': 'Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!',
     'ja': '警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります。よくお読みください。',
-    'zh-tw': "警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！",
     # 西班牙语
     'es': 'Advertencia: este artículo está traducido por una máquina, lo que puede dar lugar a una mala calidad o información incorrecta. ¡Lea atentamente!',
     # 俄语
@@ -29,21 +29,23 @@ warnings_mapping = {
 }
 
 appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
-            '.kh',
-            '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr', '.gt',
-            '.gy', '.ht', '.iq', '.jm', '.jo', '.kz', '.kw', '.lv', '.lb', '.ly', '.my', '.mt', '.mx', '.mm',
+            '.kh', '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr',
+            '.gt', '.gy', '.ht', '.iq', '.jm', '.jo', '.kz', '.kw', '.lv', '.lb', '.ly', '.my', '.mt', '.mx', '.mm',
             '.na', '.nr', '.np', '.ni', '.ng', '.nf', '.om', '.pk', '.ps', '.pa', '.pg', '.py', '.pe', '.ph', '.pl',
             '.pt', '.pr', '.qa', '.ru', '.vc', '.sa', '.sl', '.sg', '.sb', '.se', '.tj', '.tn', '.tr', '.tv',
             '.ua', '.uy', '.ve', '.vn', '.vg']
 
 load_balancing_idx = -1
 lock = threading.Lock()
+logging_lock = threading.Lock()
 
 
 def lbi_add_one():
     with lock:
         global load_balancing_idx
         load_balancing_idx += 1
+        with logging_lock:
+            print(f'Current url is https://translate.google.com{appendix[load_balancing_idx % len(appendix)]}')
         return load_balancing_idx
 
 
@@ -89,9 +91,7 @@ class GoogleTrans(object):
 
     def construct_url(self):
         self.url = f'https://translate.google.com{appendix[self.idx % len(appendix)]}/translate_a/single'
-
         self.header['referer'] = f'https://translate.google.com{appendix[self.idx % len(appendix)]}'
-        print(self.url)
         base = self.url + '?'
         for key in self.data:
             if isinstance(self.data[key], list):
@@ -121,7 +121,9 @@ class GoogleTrans(object):
         return originalText, originalLanguageCode, targetText, lang_to
 
     def translate(self, sourceTxt, srcLang, targetLang, retries=0):
-        print('translate ... sourceTxt length=', len(sourceTxt))
+        with logging_lock:
+            print(
+                f'{threading.current_thread().name} is translating {srcLang} to {targetLang}, length={len(sourceTxt)}')
         if retries > 5:
             return ''
         try:
@@ -432,30 +434,16 @@ class MdTranslater:
 
     def translate_to(self, dest_lang):
         dest_filename = os.path.join(self.base_dir, f'index.{dest_lang}.md')
-        if os.path.exists(dest_filename):
-            if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
-                return
         if not os.path.exists(self.src_filename):
             print('src file ', self.src_filename, ' not exist! skip.')
             return
-        print('translate file ', self.src_filename, ' to ', dest_filename)
+        with logging_lock:
+            print(threading.current_thread().name, ' is translating file ', self.src_filename, ' to ', dest_filename)
         with open(self.src_filename, encoding='utf-8') as src_filename_data:
             src_lines = src_filename_data.readlines()
         final_md_text = self.translate_md(src_lines, self.src_lang, dest_lang)
         with open(dest_filename, 'w', encoding='utf-8') as outfile:
             outfile.write(final_md_text)
-
-    def translate_md_folder_with_retries(self, src_lang, dest_lang, md_folder, retries=0):
-        if retries > 20:
-            return
-        try:
-            return self.translate_to(src_lang, dest_lang, md_folder)
-        except Exception as e:
-            print(e)
-            time.sleep(3)
-            retries += 1
-            self.translate_md_folder_with_retries(src_lang, dest_lang, md_folder, retries)
-
 
 if __name__ == '__main__':
     base_dir = input('Please input the folder: ')
@@ -463,7 +451,26 @@ if __name__ == '__main__':
     while not os.path.exists(src_filename):
         base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
         src_filename = os.path.join(base_dir, 'index.en.md')
-    translater = MdTranslater('zh', base_dir)
-    dest_langs = ['zh-tw', 'en', 'ja']
+    # dest_langs = ['zh-tw', 'en', 'ja']
+    dest_langs = warnings_mapping.keys()
+    waiting_to_be_translated_langs = []
     for lang in dest_langs:
-        translater.translate_to(lang)
+        dest_filename = os.path.join(base_dir, f'index.{lang}.md')
+        if os.path.exists(dest_filename):
+            if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
+                continue
+        waiting_to_be_translated_langs.append(lang)
+    start = time.time()
+    threads = []
+    for lang in waiting_to_be_translated_langs:
+        translater = MdTranslater('zh', base_dir)
+        t = threading.Thread(target=translater.translate_to, args=(lang,))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+    cost = round(time.time() - start, 2)
+    with logging_lock:
+        print(
+            f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
