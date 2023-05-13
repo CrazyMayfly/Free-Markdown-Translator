@@ -25,7 +25,9 @@ warnings_mapping = {
     # 印地语
     'hi': 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!',
     # 葡萄牙语
-    'pt': 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+    'pt': 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!',
+    # 韩语
+    'ko': '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 }
 
 appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
@@ -154,7 +156,7 @@ class Node:
         if re.match(r'\d+\. ', line):
             self.index = line[0:3]
             self.line = line[3:]
-        elif line.startswith('- '):
+        elif line.startswith('- ') or line.startswith('> '):
             self.index = line[0:2]
             self.line = line[2:]
 
@@ -231,7 +233,7 @@ class ImageNode(Node):
     def compose(self):
         if self.trans_lines == 0:
             return self.value
-        return self.index + self.value.join(self.signs)
+        return self.index + self.value.join(self.signs) + '\n'
 
 
 class LinkNode(Node):
@@ -294,7 +296,7 @@ class MdTranslater:
     def __init__(self, src_lang, base_dir):
         self.src_lang = src_lang
         self.base_dir = base_dir
-        self.src_filename = os.path.join(base_dir, 'index.md')
+        self.src_filename = os.path.join(base_dir, '_index.md')
         self.dest_lang = ''
         self.trans = GoogleTrans()
         # 指定要跳过翻译的字符，分别为加粗符号、在``中的非中文字符，`，换行符
@@ -377,9 +379,12 @@ class MdTranslater:
                 continue
 
             if is_front_matter:
-                if line.startswith(('title:', 'description:')):
+                if line.startswith(('title:', 'description:', '        name:', '  - title:', '    description:')):
                     nodes.append(KeyValueNode(line))
-                elif line.startswith(('date:', 'slug:', 'toc', 'image', 'comments', 'readingTime')):
+                elif line.startswith(('date:', 'slug:', 'toc', 'image', 'comments', 'readingTime', 'menu:', '    main:',
+                                      '        weight:', '        params:', '            icon:', 'links:',
+                                      '    website:', '    image:', 'layout:', 'outputs:', '    - html', '    - json',
+                                      'license:', '#', 'style:', '    background:', '    color:')):
                     nodes.append(TransparentNode(line))
                 elif line.startswith(('tags:', 'categories:', 'keywords:')):
                     nodes.append(KeyValueArrayNode(line))
@@ -433,7 +438,7 @@ class MdTranslater:
         return final_markdown
 
     def translate_to(self, dest_lang):
-        dest_filename = os.path.join(self.base_dir, f'index.{dest_lang}.md')
+        dest_filename = os.path.join(self.base_dir, f'_index.{dest_lang}.md')
         if not os.path.exists(self.src_filename):
             print('src file ', self.src_filename, ' not exist! skip.')
             return
@@ -441,36 +446,41 @@ class MdTranslater:
             print(threading.current_thread().name, ' is translating file ', self.src_filename, ' to ', dest_filename)
         with open(self.src_filename, encoding='utf-8') as src_filename_data:
             src_lines = src_filename_data.readlines()
+        for line in src_lines:
+            line.replace('。', '. ')
+        src_lines.append('\n')
         final_md_text = self.translate_md(src_lines, self.src_lang, dest_lang)
         with open(dest_filename, 'w', encoding='utf-8') as outfile:
             outfile.write(final_md_text)
 
-if __name__ == '__main__':
-    base_dir = input('Please input the folder: ')
-    src_filename = os.path.join(base_dir, 'index.md')
-    while not os.path.exists(src_filename):
-        base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
-        src_filename = os.path.join(base_dir, 'index.en.md')
-    # dest_langs = ['zh-tw', 'en', 'ja']
-    dest_langs = warnings_mapping.keys()
-    waiting_to_be_translated_langs = []
-    for lang in dest_langs:
-        dest_filename = os.path.join(base_dir, f'index.{lang}.md')
-        if os.path.exists(dest_filename):
-            if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
-                continue
-        waiting_to_be_translated_langs.append(lang)
-    start = time.time()
-    threads = []
-    for lang in waiting_to_be_translated_langs:
-        translater = MdTranslater('zh', base_dir)
-        t = threading.Thread(target=translater.translate_to, args=(lang,))
-        t.start()
-        threads.append(t)
 
-    for t in threads:
-        t.join()
-    cost = round(time.time() - start, 2)
-    with logging_lock:
-        print(
-            f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
+if __name__ == '__main__':
+    base_dirs = input('Please input the folders: ').split(', ')
+    for base_dir in base_dirs:
+        src_filename = os.path.join(base_dir, '_index.md')
+        while not os.path.exists(src_filename):
+            base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
+            src_filename = os.path.join(base_dir, '_index.md')
+        # dest_langs = ['zh-tw']
+        dest_langs = warnings_mapping.keys()
+        waiting_to_be_translated_langs = []
+        for lang in dest_langs:
+            dest_filename = os.path.join(base_dir, f'_index.{lang}.md')
+            if os.path.exists(dest_filename):
+                if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
+                    continue
+            waiting_to_be_translated_langs.append(lang)
+        start = time.time()
+        threads = []
+        for lang in waiting_to_be_translated_langs:
+            translater = MdTranslater('zh', base_dir)
+            t = threading.Thread(target=translater.translate_to, args=(lang,))
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
+        cost = round(time.time() - start, 2)
+        with logging_lock:
+            print(
+                f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
