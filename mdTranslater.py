@@ -1,7 +1,7 @@
-import glob
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -11,7 +11,7 @@ from cgitb import text
 
 # ssl._create_default_https_context = ssl._create_unverified_context
 warnings_mapping = {
-    'en': 'Warning: This article is translated by machine, which may lead to poor quality or incorrect information, please read with caution!',
+    'en': 'Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!',
     'ja': '警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります。よくお読みください。',
     'zh-tw': "警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！",
     # 西班牙语
@@ -25,21 +25,38 @@ warnings_mapping = {
     # 印地语
     'hi': 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!',
     # 葡萄牙语
-    'pt':'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+    'pt': 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
 }
 
-appendix = ['','.hk','.tw','']
+appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
+            '.kh',
+            '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr', '.gt',
+            '.gy', '.ht', '.iq', '.jm', '.jo', '.kz', '.kw', '.lv', '.lb', '.ly', '.my', '.mt', '.mx', '.mm',
+            '.na', '.nr', '.np', '.ni', '.ng', '.nf', '.om', '.pk', '.ps', '.pa', '.pg', '.py', '.pe', '.ph', '.pl',
+            '.pt', '.pr', '.qa', '.ru', '.vc', '.sa', '.sl', '.sg', '.sb', '.se', '.tj', '.tn', '.tr', '.tv',
+            '.ua', '.uy', '.ve', '.vn', '.vg']
+
+load_balancing_idx = -1
+lock = threading.Lock()
+
+
+def lbi_add_one():
+    with lock:
+        global load_balancing_idx
+        load_balancing_idx += 1
+        return load_balancing_idx
+
+
 class GoogleTrans(object):
     def __init__(self):
-        # self.url = 'https://translate.google.com.hk/translate_a/single'
-        self.url = 'https://translate.google.com.fr/translate_a/single'
+        self.url = 'https://translate.google.com/translate_a/single'
         self.TKK = "434674.96463358"  # 随时都有可能需要更新的TKK值
-
+        self.idx = lbi_add_one()
         self.header = {
             "accept": "*/*",
             "accept-language": "zh-CN,zh;q=0.9",
             "cookie": "NID=188=M1p_rBfweeI_Z02d1MOSQ5abYsPfZogDrFjKwIUbmAr584bc9GBZkfDwKQ80cQCQC34zwD4ZYHFMUf4F59aDQLSc79_LcmsAihnW0Rsb1MjlzLNElWihv-8KByeDBblR2V1kjTSC8KnVMe32PNSJBQbvBKvgl4CTfzvaIEgkqss",
-            "referer": "https://translate.google.cn/",
+            "referer": "https://translate.google.com/",
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36",
             "x-client-data": "CJK2yQEIpLbJAQjEtskBCKmdygEIqKPKAQi5pcoBCLGnygEI4qjKAQjxqcoBCJetygEIza3KAQ==",
         }
@@ -71,6 +88,10 @@ class GoogleTrans(object):
         self.TKK = re.findall(r"tkk:'([0-9]+\.[0-9]+)'", page_source)[0]
 
     def construct_url(self):
+        self.url = f'https://translate.google.com{appendix[self.idx % len(appendix)]}/translate_a/single'
+
+        self.header['referer'] = f'https://translate.google.com{appendix[self.idx % len(appendix)]}'
+        print(self.url)
         base = self.url + '?'
         for key in self.data:
             if isinstance(self.data[key], list):
@@ -101,13 +122,14 @@ class GoogleTrans(object):
 
     def translate(self, sourceTxt, srcLang, targetLang, retries=0):
         print('translate ... sourceTxt length=', len(sourceTxt))
-        if retries > 1:
+        if retries > 5:
             return ''
         try:
             result = self.query(sourceTxt, srcLang, lang_to=targetLang)[2]
             if result is None:
                 retries += 1
                 print('retry ', retries)
+                self.idx = lbi_add_one()
                 self.translate(sourceTxt, srcLang, targetLang, retries)
             else:
                 return result
@@ -115,14 +137,24 @@ class GoogleTrans(object):
             print(e)
             retries += 1
             print(retries)
+            self.idx = lbi_add_one()
             self.translate(sourceTxt, srcLang, targetLang, retries)
 
 
 class Node:
-    def __init__(self):
+    def __init__(self, line):
         self.signs = ''
         self.value = ''
+        # 开头为1. 等情况
+        self.index = ''
         self.trans_lines = 1
+        self.line = line
+        if re.match(r'\d+\. ', line):
+            self.index = line[0:3]
+            self.line = line[3:]
+        elif line.startswith('- '):
+            self.index = line[0:2]
+            self.line = line[2:]
 
     def get_trans_buff(self):
         if self.trans_lines:
@@ -130,14 +162,14 @@ class Node:
         return None
 
     def compose(self):
-        return self.value
+        return self.index + self.value
 
 
 # 内容无需翻译
 class TransparentNode(Node):
     def __init__(self, line):
-        super().__init__()
-        self.value = line
+        super().__init__(line)
+        self.value = self.line
         self.trans_lines = 0
 
 
@@ -145,50 +177,50 @@ class TransparentNode(Node):
 # 比如MD中的正文文本块
 class SolidNode(Node):
     def __init__(self, line):
-        super().__init__()
-        self.value = line[0:-1]
+        super().__init__(line)
+        self.value = self.line[0:-1]
 
     def compose(self):
-        return self.value + '\n'
+        return self.index + self.signs + self.value + '\n'
 
 
 # 内容为#key:value形式，value需要翻译
 class KeyValueNode(Node):
     def __init__(self, line):
-        super().__init__()
-        idx = line.index(':')
-        self.signs = line[0: idx + 1]
-        self.value = line[idx + 1:].strip()
+        super().__init__(line)
+        idx = self.line.index(':')
+        self.signs = self.line[0: idx + 1]
+        self.value = self.line[idx + 1:].strip()
 
     def compose(self):
-        return self.signs + ' ' + self.value + '\n'
+        return self.index + self.signs + ' ' + self.value + '\n'
 
 
 # 内容为### Title形式，Title需要翻译
 class TitleNode(Node):
     def __init__(self, line):
-        super().__init__()
-        idx = line.index(' ')
-        self.signs = line[0: idx]
-        self.value = line[idx + 1:-1]
+        super().__init__(line)
+        idx = self.line.index(' ')
+        self.signs = self.line[0: idx]
+        self.value = self.line[idx + 1:-1]
 
     def compose(self):
-        return self.signs + " " + self.value + '\n'
+        return self.index + self.signs + " " + self.value + '\n'
 
 
 # 内容为![图片标题](01.jpg) 形式，图片标题需要翻译
 class ImageNode(Node):
     def __init__(self, line):
-        super().__init__()
-        idx1 = line.index('[')
-        idx2 = line.index(']')
+        super().__init__(line)
+        idx1 = self.line.index('[')
+        idx2 = self.line.index(']')
         if idx1 == idx2 - 1:
             self.trans_lines = 0
-            self.value = line
+            self.value = self.line
         else:
-            lstr = line[0: idx1 + 1]
-            mstr = line[idx1 + 1: idx2]
-            rstr = line[idx2: -1]
+            lstr = self.line[0: idx1 + 1]
+            mstr = self.line[idx1 + 1: idx2]
+            rstr = self.line[idx2: -1]
             self.value = mstr
             self.signs = []
             self.signs.append(lstr)
@@ -197,16 +229,16 @@ class ImageNode(Node):
     def compose(self):
         if self.trans_lines == 0:
             return self.value
-        return self.value.join(self.signs)
+        return self.index + self.value.join(self.signs)
 
 
 class LinkNode(Node):
     def __init__(self, line):
-        super().__init__()
+        super().__init__(line)
         pattern = r'\[.*?\]\(.*?\)'
         p = re.compile(pattern)
-        text = p.split(line[0:-1])
-        links = re.findall(pattern, line)
+        text = p.split(self.line[0:-1])
+        links = re.findall(pattern, self.line)
         tips = []
         self.signs = []
         for link in links:
@@ -231,17 +263,17 @@ class LinkNode(Node):
             results.append(text[i])
             results.append(links[i])
         results.append(text[-1])
-        return ''.join(results) + '\n'
+        return self.index + ''.join(results) + '\n'
 
 
 # 内容为#key:["values1","values2",..."valueN"]形式，value需要翻译
 class KeyValueArrayNode(Node):
     def __init__(self, line):
-        super().__init__()
-        idx = line.index(':')
-        key = line[0: idx + 1]
+        super().__init__(line)
+        idx = self.line.index(':')
+        key = self.line[0: idx + 1]
         self.signs = key
-        value = line[idx + 1:].strip()
+        value = self.line[idx + 1:].strip()
         if value.startswith('['):
             items = value[2:-2].split('", "')
             if not items:
@@ -253,7 +285,7 @@ class KeyValueArrayNode(Node):
 
     def compose(self):
         items = self.value.split('\n')
-        return '{} ["{}"]'.format(self.signs, '\", \"'.join(items)) + '\n'
+        return self.index + '{} ["{}"]'.format(self.signs, '\", \"'.join(items)) + '\n'
 
 
 class MdTranslater:
@@ -262,17 +294,67 @@ class MdTranslater:
         self.base_dir = base_dir
         self.src_filename = os.path.join(base_dir, 'index.md')
         self.dest_lang = ''
+        self.trans = GoogleTrans()
+        # 指定要跳过翻译的字符，分别为加粗符号、在``中的非中文字符，`，换行符
+        self.skipped_chars = ["\*\*。?", r'`[^\u4E00-\u9FFF]*?`', '`', r'"[^\u4E00-\u9FFF]*?"', '\n']
+        # self.pattern = "|".join(map(re.escape, self.skipped_chars))
+        self.pattern = "|".join(self.skipped_chars)
+
+    def skipped_chars_translate(self, text, src_lang, dest_lang):
+        parts = re.split(f"({self.pattern})", text)
+        # 跳过的部分
+        skipped_parts = {}
+        # 需要翻译的部分
+        translated_parts = {}
+        idx = 0
+        for part in parts:
+            if len(part) == 0:
+                continue
+            is_translated = True
+            for skipped_char in self.skipped_chars:
+                if re.match(skipped_char, part):  # 原封不动地添加跳过的字符
+                    skipped_parts.update({idx: part})
+                    is_translated = False
+                    break
+            if is_translated:
+                translated_parts.update({idx: part})
+            idx += 1
+        # 组装翻译
+        text = '\n'.join(translated_parts.values())
+        translate = self.trans.translate(text, src_lang, dest_lang)
+        # 确保api接口返回了结果
+        while translate is None:
+            translate = self.trans.translate(text, src_lang, dest_lang)
+        translated_text = translate.split('\n')
+        idx1 = 0
+        # 更新翻译部分的内容
+        for key in translated_parts.keys():
+            translated_parts[key] = translated_text[idx1]
+            idx1 += 1
+        total_parts = {}
+        total_parts.update(skipped_parts)
+        total_parts.update(translated_parts)
+        translated_text = ''
+        # 拼接回字符串
+        for i in range(0, idx):
+            translated_text += total_parts[i]
+        splitlines = translated_text.splitlines()[1:-1]
+        translated_text = '\n'.join(splitlines) + '\n'
+        return translated_text
 
     def translate(self, lines, src_lang, dest_lang):
-        tmp = ""
+        tmp = "BEGIN\n"
         translated_text = ""
         for line in lines:
             tmp = tmp + line + '\n'
             if len(tmp) > 500:  # 不同语言这个值不同
-                translated_text += GoogleTrans().translate(tmp, src_lang, dest_lang) + '\n'
-                tmp = ""
+                tmp += 'END'
+                translated_text += self.skipped_chars_translate(tmp, src_lang, dest_lang)
+                tmp = "BEGIN\n"
+
         if len(tmp) > 0:
-            translated_text += GoogleTrans().translate(tmp, src_lang, dest_lang) + '\n'
+            tmp += 'END'
+            translated_text += self.skipped_chars_translate(tmp, src_lang, dest_lang)
         return translated_text
 
     def get_nodes(self, src_lines):
@@ -285,8 +367,7 @@ class MdTranslater:
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
                 if not is_front_matter:
-                    nodes.append(TransparentNode(
-                        '> ' + warnings_mapping[self.dest_lang]))
+                    nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
                 continue
             if line.startswith('```'):
                 is_code_block = not is_code_block
@@ -296,7 +377,7 @@ class MdTranslater:
             if is_front_matter:
                 if line.startswith(('title:', 'description:')):
                     nodes.append(KeyValueNode(line))
-                elif line.startswith(('date:', 'slug:', 'toc', 'image')):
+                elif line.startswith(('date:', 'slug:', 'toc', 'image', 'comments', 'readingTime')):
                     nodes.append(TransparentNode(line))
                 elif line.startswith(('tags:', 'categories:', 'keywords:')):
                     nodes.append(KeyValueArrayNode(line))
@@ -309,7 +390,6 @@ class MdTranslater:
                     nodes.append(TransparentNode(line))
                 elif re.search('!\[.*?\]\(.*?\)', line) is not None:  # 图片
                     nodes.append(ImageNode(line))
-                    # nodes.append(MdTransItemReserve(line))
                 elif re.search('\[.*?\]\(.*?\)', line) is not None:
                     nodes.append(LinkNode(line))
                 elif line.strip().startswith('#'):  # 标题
@@ -324,17 +404,16 @@ class MdTranslater:
         self.dest_lang = dest_lang
         nodes = self.get_nodes(src_lines)
         # 待翻译md文本
-        src_md_text = 'BEGIN\n'
+        src_md_text = ''
         for node in nodes:
             trans_buff = node.get_trans_buff()
             if trans_buff:
                 src_md_text += trans_buff
-        src_md_text += 'END'
         # 分割文本，每次翻译，发送大小不大于2000
         src_lines = src_md_text.splitlines()
         translated_text = self.translate(src_lines, src_lang, dest_lang)
         translated_lines = translated_text.splitlines()
-        start_pos = 1  # 从第一行开始对应，首行为添加的无意义
+        start_pos = 0
         for node in nodes:
             node_trans_lines = node.trans_lines
             if node_trans_lines == 0:
