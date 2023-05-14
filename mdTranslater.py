@@ -29,6 +29,8 @@ warnings_mapping = {
     # 韩语
     'ko': '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 }
+# 控制是否在文章前面添加机器翻译的Warning
+insert_warnings = True
 
 appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
             '.kh', '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr',
@@ -248,7 +250,7 @@ class LinkNode(Node):
         for link in links:
             idx = link.index(']')
             tips.append(link[1:idx])
-            self.signs.append(link[idx + 2:-2])
+            self.signs.append(link[idx + 2:-1])
         self.text_num = len(text)
         self.link_num = len(links)
         self.trans_lines = self.text_num + self.link_num
@@ -293,14 +295,15 @@ class KeyValueArrayNode(Node):
 
 
 class MdTranslater:
-    def __init__(self, src_lang, base_dir):
+    def __init__(self, src_lang, base_dir, src_filename_body):
         self.src_lang = src_lang
         self.base_dir = base_dir
-        self.src_filename = os.path.join(base_dir, '_index.md')
+        self.src_filename_body = src_filename_body
+        self.src_filename = os.path.join(base_dir, src_filename_body + '.md')
         self.dest_lang = ''
         self.trans = GoogleTrans()
         # 指定要跳过翻译的字符，分别为加粗符号、在``中的非中文字符，`，换行符
-        self.skipped_chars = ["\*\*。?", r'`[^\u4E00-\u9FFF]*?`', '`', r'"[^\u4E00-\u9FFF]*?"', '\n']
+        self.skipped_chars = ["\*\*。?", '#+', r'`[^\u4E00-\u9FFF]*?`', '`', r'"[^\u4E00-\u9FFF]*?"','Hello World', '\n']
         # self.pattern = "|".join(map(re.escape, self.skipped_chars))
         self.pattern = "|".join(self.skipped_chars)
 
@@ -370,7 +373,7 @@ class MdTranslater:
             if line.strip() == '---':
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
-                if not is_front_matter:
+                if not is_front_matter and insert_warnings:
                     nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
                 continue
             if line.startswith('```'):
@@ -438,7 +441,7 @@ class MdTranslater:
         return final_markdown
 
     def translate_to(self, dest_lang):
-        dest_filename = os.path.join(self.base_dir, f'_index.{dest_lang}.md')
+        dest_filename = os.path.join(self.base_dir, f'{self.src_filename_body}.{dest_lang}.md')
         if not os.path.exists(self.src_filename):
             print('src file ', self.src_filename, ' not exist! skip.')
             return
@@ -446,8 +449,11 @@ class MdTranslater:
             print(threading.current_thread().name, ' is translating file ', self.src_filename, ' to ', dest_filename)
         with open(self.src_filename, encoding='utf-8') as src_filename_data:
             src_lines = src_filename_data.readlines()
-        for line in src_lines:
-            line.replace('。', '. ')
+        if dest_lang != 'zh-tw':
+            src_lines_tmp = []
+            for line in src_lines:
+                src_lines_tmp.append(line.replace('。', '. '))
+            src_lines = src_lines_tmp
         src_lines.append('\n')
         final_md_text = self.translate_md(src_lines, self.src_lang, dest_lang)
         with open(dest_filename, 'w', encoding='utf-8') as outfile:
@@ -455,32 +461,51 @@ class MdTranslater:
 
 
 if __name__ == '__main__':
+    detect_filenames = ['index', 'readme', '_index']
     base_dirs = input('Please input the folders: ').split(', ')
     for base_dir in base_dirs:
-        src_filename = os.path.join(base_dir, '_index.md')
-        while not os.path.exists(src_filename):
-            base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
-            src_filename = os.path.join(base_dir, '_index.md')
-        # dest_langs = ['zh-tw']
-        dest_langs = warnings_mapping.keys()
-        waiting_to_be_translated_langs = []
-        for lang in dest_langs:
-            dest_filename = os.path.join(base_dir, f'_index.{lang}.md')
-            if os.path.exists(dest_filename):
-                if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
-                    continue
-            waiting_to_be_translated_langs.append(lang)
-        start = time.time()
-        threads = []
-        for lang in waiting_to_be_translated_langs:
-            translater = MdTranslater('zh', base_dir)
-            t = threading.Thread(target=translater.translate_to, args=(lang,))
-            t.start()
-            threads.append(t)
+        count = 0
+        for detect_filename in detect_filenames:
+            src_filename = os.path.join(base_dir, detect_filename + '.md')
+            if os.path.exists(src_filename):
+                count += 1
+        while count == 0:
+            count = 0
+            base_dir = input(f'Can not find {detect_filenames}, please enter the valid folder again: ')
+            for detect_filename in detect_filenames:
+                src_filename = os.path.join(base_dir, detect_filename + '.md')
+                if os.path.exists(src_filename):
+                    count += 1
 
-        for t in threads:
-            t.join()
-        cost = round(time.time() - start, 2)
-        with logging_lock:
-            print(
-                f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
+        # src_filename = os.path.join(base_dir, '_index.md')
+        # while not os.path.exists(src_filename):
+        #     base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
+        #     src_filename = os.path.join(base_dir, '_index.md')
+
+        for detect_filename in detect_filenames:
+            src_filename = os.path.join(base_dir, detect_filename + '.md')
+            if os.path.exists(src_filename):
+                # dest_langs = ['zh-tw']
+                # dest_langs = ['en']
+                dest_langs = warnings_mapping.keys()
+                waiting_to_be_translated_langs = []
+                for lang in dest_langs:
+                    dest_filename = os.path.join(base_dir, f'{detect_filename}.{lang}.md')
+                    if os.path.exists(dest_filename):
+                        if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
+                            continue
+                    waiting_to_be_translated_langs.append(lang)
+                start = time.time()
+                threads = []
+                for lang in waiting_to_be_translated_langs:
+                    translater = MdTranslater('zh', base_dir, detect_filename)
+                    t = threading.Thread(target=translater.translate_to, args=(lang,))
+                    t.start()
+                    threads.append(t)
+
+                for t in threads:
+                    t.join()
+                cost = round(time.time() - start, 2)
+                with logging_lock:
+                    print(
+                        f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
