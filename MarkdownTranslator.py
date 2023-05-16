@@ -1,4 +1,6 @@
+import argparse
 import os
+import pathlib
 import threading
 import time
 
@@ -16,7 +18,12 @@ class MdTranslater:
         self.dest_lang = ''
         self.trans = GoogleTrans()
 
-    def skipped_chars_translate(self, text, src_lang, dest_lang):
+    def translate_with_skipped_chars(self, text, src_lang, dest_lang):
+        """
+        翻译时忽略在config.py中配置的正则表达式，翻译后保证格式不变
+        :param text: 本次翻译的文本
+        :return: 翻译后的文本
+        """
         parts = re.split(pattern, text)
         # 跳过的部分
         skipped_parts = {}
@@ -27,7 +34,7 @@ class MdTranslater:
             if len(part) == 0:
                 continue
             is_translated = True
-            for skipped_char in skipped_chars:
+            for skipped_char in skipped_regexs:
                 if re.match(skipped_char, part):  # 原封不动地添加跳过的字符
                     skipped_parts.update({idx: part})
                     is_translated = False
@@ -58,29 +65,39 @@ class MdTranslater:
         translated_text = '\n'.join(splitlines) + '\n'
         return translated_text
 
-    def translate(self, lines, src_lang, dest_lang):
+    def translate_in_batches(self, lines, src_lang, dest_lang):
+        """
+        分批次翻译
+        """
+        # 需在头尾添加字符以保证Google Translate Api不会把空行去除
         tmp = "BEGIN\n"
         translated_text = ""
         for line in lines:
             tmp = tmp + line + '\n'
-            if len(tmp) > 500:  # 不同语言这个值不同
+            # 控制每次发送的数据量
+            if len(tmp) > 500:
                 tmp += 'END'
-                translated_text += self.skipped_chars_translate(tmp, src_lang, dest_lang)
+                translated_text += self.translate_with_skipped_chars(tmp, src_lang, dest_lang)
                 tmp = "BEGIN\n"
 
         if len(tmp) > 0:
             tmp += 'END'
-            translated_text += self.skipped_chars_translate(tmp, src_lang, dest_lang)
+            translated_text += self.translate_with_skipped_chars(tmp, src_lang, dest_lang)
         return translated_text
 
     def generate_nodes(self, src_lines):
+        """
+        扫描每行，依次为每行生成节点
+        """
         is_front_matter = False
+        # 在```包裹的代码块中
         is_code_block = False
         nodes = []
         for line in src_lines:
             if line.strip() == '---':
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
+                # 添加头部的机器翻译警告
                 if not is_front_matter and insert_warnings:
                     nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
                 continue
@@ -114,6 +131,9 @@ class MdTranslater:
         return nodes
 
     def translate_lines(self, src_lines, src_lang, dest_lang):
+        """
+        执行数据的拆分翻译组装
+        """
         self.dest_lang = dest_lang
         nodes = self.generate_nodes(src_lines)
         # 待翻译md文本
@@ -122,9 +142,8 @@ class MdTranslater:
             trans_buff = node.get_trans_buff()
             if trans_buff:
                 src_md_text += trans_buff
-        # 分割文本，每次翻译，发送大小不大于2000
         src_lines = src_md_text.splitlines()
-        translated_text = self.translate(src_lines, src_lang, dest_lang)
+        translated_text = self.translate_in_batches(src_lines, src_lang, dest_lang)
         translated_lines = translated_text.splitlines()
         start_pos = 0
         for node in nodes:
@@ -144,6 +163,9 @@ class MdTranslater:
         return final_markdown
 
     def translate_to(self, dest_lang):
+        """
+        执行文件的读取、翻译、写入
+        """
         dest_filename = os.path.join(self.base_dir, f'{self.src_filename_body}.{dest_lang}.md')
         if not os.path.exists(self.src_filename):
             print('src file ', self.src_filename, ' not exist! skip.')
@@ -164,8 +186,20 @@ class MdTranslater:
 
 
 if __name__ == '__main__':
-    base_dirs = input('Please input the folders: ').split(', ')
+    parser = argparse.ArgumentParser(
+        description='Markdown Translator, just input folders and you will get all the langs you want.')
+    parser.add_argument('folders', metavar='folder', type=pathlib.Path, nargs='+',
+                        help='the markdown files in folders to be translated.')
+    args = parser.parse_args()
+    base_dirs = args.folders
+    # 可以一次性将多个文件夹添加入队列
+    # base_dirs = input('Please input the folders: ').split(', ')
     for base_dir in base_dirs:
+        if not os.path.exists(base_dir):
+            print(f'{base_dir} does not exist, Skipped!!!')
+            continue
+        print(f'Current folder is : {base_dir}')
+        # 每个文件夹下至少存在一个配置中的文件名
         count = 0
         for detect_filename in detect_filenames:
             src_filename = os.path.join(base_dir, detect_filename + '.md')
@@ -179,17 +213,14 @@ if __name__ == '__main__':
                 if os.path.exists(src_filename):
                     count += 1
 
-        # src_filename = os.path.join(base_dir, '_index.md')
-        # while not os.path.exists(src_filename):
-        #     base_dir = input(f'Can not find {src_filename}, please enter the valid folder again: ')
-        #     src_filename = os.path.join(base_dir, '_index.md')
-
         for detect_filename in detect_filenames:
             src_filename = os.path.join(base_dir, detect_filename + '.md')
             if os.path.exists(src_filename):
+                # 指定目标语言
                 # dest_langs = ['zh-tw']
                 # dest_langs = ['en']
                 dest_langs = warnings_mapping.keys()
+                # 将要被翻译至的语言
                 waiting_to_be_translated_langs = []
                 for lang in dest_langs:
                     dest_filename = os.path.join(base_dir, f'{detect_filename}.{lang}.md')
@@ -197,6 +228,7 @@ if __name__ == '__main__':
                         if input(f'{dest_filename} already exists, whether to continue(y/n): ') != 'y':
                             continue
                     waiting_to_be_translated_langs.append(lang)
+                # 使用多线程翻译
                 start = time.time()
                 threads = []
                 for lang in waiting_to_be_translated_langs:
@@ -208,6 +240,5 @@ if __name__ == '__main__':
                 for t in threads:
                     t.join()
                 cost = round(time.time() - start, 2)
-                with logging_lock:
-                    print(
-                        f'Total time cost: {cost}s, average per lang cost: {round(cost / len(waiting_to_be_translated_langs), 2)}s.')
+                print(f'Total time cost: {cost}s, average per lang cost: '
+                      f'{round(cost / len(waiting_to_be_translated_langs), 2)}s.\n')
