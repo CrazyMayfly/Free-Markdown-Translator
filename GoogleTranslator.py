@@ -5,11 +5,7 @@ import urllib.parse
 import urllib.request
 import execjs
 
-load_balancing_idx = -1
-lock = threading.Lock()
-
-logging_lock = threading.Lock()
-
+# Google Translate Api 池
 appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
             '.kh', '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr',
             '.gt', '.gy', '.ht', '.iq', '.jm', '.jo', '.kz', '.kw', '.lv', '.lb', '.ly', '.my', '.mt', '.mx', '.mm',
@@ -17,7 +13,12 @@ appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '
             '.pt', '.pr', '.qa', '.ru', '.vc', '.sa', '.sl', '.sg', '.sb', '.se', '.tj', '.tn', '.tr', '.tv',
             '.ua', '.uy', '.ve', '.vn', '.vg']
 
+# 用于负载均衡，当GoogleTrans对象实例化时或者请求出问题、没有返回数据自动切换url
+load_balancing_idx = -1
 
+# 应对多线程的锁，为单线程应用时无需加锁
+lock = threading.Lock()
+logging_lock = threading.Lock()
 def lbi_add_one():
     with lock:
         global load_balancing_idx
@@ -44,6 +45,7 @@ class GoogleTrans(object):
         self.data = {
             "client": "webapp",  # 基于网页访问服务器
             "sl": "zh-cn",  # 源语言,auto表示由谷歌自动识别
+            # "sl": "auto",   源语言,auto表示由谷歌自动识别
             "tl": "en",  # 翻译的目标语言
             "hl": "zh-cn",  # 界面语言选中文，毕竟URL都是cn后缀了，就不装美国人了
             # dt表示要求服务器返回的数据类型
@@ -68,6 +70,7 @@ class GoogleTrans(object):
         self.TKK = re.findall(r"tkk:'([0-9]+\.[0-9]+)'", page_source)[0]
 
     def construct_url(self):
+        # 构建Url时使用负载均衡
         self.url = f'https://translate.google.com{appendix[self.idx % len(appendix)]}/translate_a/single'
         self.header['referer'] = f'https://translate.google.com{appendix[self.idx % len(appendix)]}'
         base = self.url + '?'
@@ -109,6 +112,7 @@ class GoogleTrans(object):
             if result is None:
                 retries += 1
                 print('retry ', retries)
+                # 返回结果为None时切换url
                 self.idx = lbi_add_one()
                 self.translate(sourceTxt, srcLang, targetLang, retries)
             else:
@@ -116,6 +120,7 @@ class GoogleTrans(object):
         except Exception as e:
             print(e)
             retries += 1
-            print(retries)
+            print('retry ', retries)
+            # 出错时切换Url
             self.idx = lbi_add_one()
             self.translate(sourceTxt, srcLang, targetLang, retries)

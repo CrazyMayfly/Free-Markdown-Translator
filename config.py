@@ -1,4 +1,7 @@
 # ssl._create_default_https_context = ssl._create_unverified_context
+# 控制是否在文章前面添加机器翻译的Warning
+insert_warnings = True
+# 配置目标语言及其warning，默认按照定义顺序翻译为下面语言
 warnings_mapping = {
     'zh-tw': "警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！",
     'en': 'Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!',
@@ -18,20 +21,20 @@ warnings_mapping = {
     # 韩语
     'ko': '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 }
-# 控制是否在文章前面添加机器翻译的Warning
-insert_warnings = True
 
 # 指定要跳过翻译的字符，分别为加粗符号、在``中的非中文字符，`，换行符
-skipped_chars = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'Hello World',
+skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'Hello World',
                  '\n']
 # pattern = "|".join(map(re.escape, self.skipped_chars))
-pattern = "({})".format("|".join(skipped_chars))
-
+pattern = "({})".format("|".join(skipped_regexs))
+# 文件目录下需要翻译的文档的名称
 detect_filenames = ['index', 'readme', '_index']
-
+# markdown中Front Matter不用翻译的部分
 front_matter_transparent_keys = ('date:', 'slug:', 'toc', 'image', 'comments', 'readingTime', 'menu:', '    main:',
                                  '        weight:', '        params:', '            icon:', 'links:',
                                  '    website:', '    image:', 'layout:', 'outputs:', '    - html', '    - json',
                                  'license:', '#', 'style:', '    background:', '    color:')
+# 需要以Key-Value形式翻译的部分
 front_matter_key_value_keys = ('title:', 'description:', '        name:', '  - title:', '    description:')
+# 以Key-Value—Arrays形式翻译
 front_matter_key_value_array_keys = ('tags:', 'categories:', 'keywords:')

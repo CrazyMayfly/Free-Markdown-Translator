@@ -4,10 +4,13 @@ from cgitb import text
 
 class Node:
     def __init__(self, line):
+        # 无需翻译的格式相关内容
         self.signs = ''
+        # 需要被翻译的内容
         self.value = ''
-        # 开头为1. 等情况
+        # 开头不需要翻译的内容，如1. , - ,>等
         self.index = ''
+        # value的行数，若为0表示无需翻译
         self.trans_lines = 1
         self.line = line
         if re.match(r'\d+\. ', line):
@@ -18,11 +21,13 @@ class Node:
             self.line = line[2:]
 
     def get_trans_buff(self):
+        # 获取该节点的待翻译内容
         if self.trans_lines:
             return self.value + '\n'
         return None
 
     def compose(self):
+        # 将翻译后的内容组装
         return self.index + self.value
 
 
