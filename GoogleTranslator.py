@@ -5,6 +5,8 @@ import urllib.parse
 import urllib.request
 import execjs
 
+from config import src_language
+
 # Google Translate Api 池
 appendix = ['', '.tw', '.hk', '.af', '.ai', '.ag', '.ar', '.au', '.bh', '.bd', '.by', '.bz', '.bo', '.br', '.bn', '.bi',
             '.kh', '.co', '.cu', '.cy', '.cz', '.do', '.ec', '.eg', '.sv', '.et', '.fj', '.ge', '.gh', '.gi', '.gr',
@@ -44,8 +46,7 @@ class GoogleTrans(object):
 
         self.data = {
             "client": "webapp",  # 基于网页访问服务器
-            "sl": "zh-cn",  # 源语言,auto表示由谷歌自动识别
-            # "sl": "auto",   源语言,auto表示由谷歌自动识别
+            "sl": src_language,   #源语言, auto表示由谷歌自动识别
             "tl": "en",  # 翻译的目标语言
             "hl": "zh-cn",  # 界面语言选中文，毕竟URL都是cn后缀了，就不装美国人了
             # dt表示要求服务器返回的数据类型
