@@ -17,6 +17,7 @@ class MdTranslater:
         self.src_filename = os.path.join(base_dir, src_filename_body + '.md')
         self.dest_lang = ''
         self.trans = GoogleTrans()
+        self.insert_warnings = insert_warnings
 
     def translate_with_skipped_chars(self, text, src_lang, dest_lang):
         """
@@ -98,8 +99,9 @@ class MdTranslater:
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
                 # 添加头部的机器翻译警告
-                if not is_front_matter and insert_warnings:
+                if not is_front_matter and self.insert_warnings:
                     nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
+                    self.insert_warnings = False
                 continue
             if line.startswith('```'):
                 is_code_block = not is_code_block
@@ -126,6 +128,11 @@ class MdTranslater:
                     nodes.append(LinkNode(line))
                 elif line.strip().startswith('#'):  # 标题
                     nodes.append(TitleNode(line))
+                    # 一级标题
+                    if line.strip().startswith('# ') and self.insert_warnings:
+                        nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
+                        self.insert_warnings = False
+
                 else:  # 普通文字
                     nodes.append(SolidNode(line))
         return nodes
@@ -216,10 +223,6 @@ if __name__ == '__main__':
         for detect_filename in detect_filenames:
             src_filename = os.path.join(base_dir, detect_filename + '.md')
             if os.path.exists(src_filename):
-                # 指定目标语言
-                # dest_langs = ['zh-tw']
-                # dest_langs = ['en']
-                dest_langs = warnings_mapping.keys()
                 # 将要被翻译至的语言
                 waiting_to_be_translated_langs = []
                 for lang in dest_langs:
