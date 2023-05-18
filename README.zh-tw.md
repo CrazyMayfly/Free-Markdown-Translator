@@ -1,5 +1,9 @@
 # Free Markdown Translator
 
+[![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![made-with-javascript](https://img.shields.io/badge/Made%20with-JavaScript-1f425f.svg)](https://www.javascript.com)
+[![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
+
 > 警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！
 
 ## 簡介

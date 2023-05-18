@@ -1,5 +1,9 @@
 # Free Markdown Translator
 
+[![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![made-with-javascript](https://img.shields.io/badge/Made%20with-JavaScript-1f425f.svg)](https://www.javascript.com)
+[![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
+
 ## 简介
 
 Free Markdown Translator是一款基于Google Translate API 的免费、开源的Markdown文档（以下简称md）翻译器，能够将你的md翻译成任意种语言。
