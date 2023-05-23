@@ -93,6 +93,8 @@ class MdTranslater:
         is_front_matter = False
         # 在```包裹的代码块中
         is_code_block = False
+        # 忽略翻译的部分，实际上和代码块内容差不多，只是连标识符都忽略了
+        do_not_trans = False
         nodes = []
         for line in src_lines:
             if line.strip() == '---':
@@ -107,6 +109,9 @@ class MdTranslater:
                 is_code_block = not is_code_block
                 nodes.append(TransparentNode(line))
                 continue
+            if line.startswith('__do_not_translate__'):
+                do_not_trans = not do_not_trans
+                continue
 
             if is_front_matter:
                 if line.startswith(front_matter_key_value_keys):
@@ -117,7 +122,7 @@ class MdTranslater:
                     nodes.append(KeyValueArrayNode(line))
                 else:
                     nodes.append(SolidNode(line))
-            elif is_code_block:
+            elif is_code_block or do_not_trans:
                 nodes.append(TransparentNode(line))
             else:
                 if len(line.strip()) == 0 or line.startswith(('<audio', '<img ')):  # 空行
