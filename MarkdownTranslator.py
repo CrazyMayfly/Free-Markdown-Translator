@@ -10,14 +10,15 @@ from config import *
 
 
 class MdTranslater:
+    trans = GoogleTrans()
+
     def __init__(self, src_lang, base_dir, src_filename_body):
-        self.src_lang = src_lang
-        self.base_dir = base_dir
-        self.src_filename_body = src_filename_body
-        self.src_filename = os.path.join(base_dir, src_filename_body + '.md')
-        self.dest_lang = ''
-        self.trans = GoogleTrans()
-        self.insert_warnings = insert_warnings
+        self.__src_lang = src_lang
+        self.__base_dir = base_dir
+        self.__src_filename_body = src_filename_body
+        self.__src_filename = os.path.join(base_dir, src_filename_body + '.md')
+        self.__dest_lang = ''
+        self.__insert_warnings = insert_warnings
 
     def translate_with_skipped_chars(self, text, src_lang, dest_lang):
         """
@@ -101,9 +102,9 @@ class MdTranslater:
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
                 # 添加头部的机器翻译警告
-                if not is_front_matter and self.insert_warnings:
-                    nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
-                    self.insert_warnings = False
+                if not is_front_matter and self.__insert_warnings:
+                    nodes.append(TransparentNode(f'\n> {warnings_mapping[self.__dest_lang]}\n'))
+                    self.__insert_warnings = False
                 continue
             if line.startswith('```'):
                 is_code_block = not is_code_block
@@ -134,9 +135,9 @@ class MdTranslater:
                 elif line.strip().startswith('#'):  # 标题
                     nodes.append(TitleNode(line))
                     # 一级标题
-                    if line.strip().startswith('# ') and self.insert_warnings:
-                        nodes.append(TransparentNode(f'\n> {warnings_mapping[self.dest_lang]}\n'))
-                        self.insert_warnings = False
+                    if line.strip().startswith('# ') and self.__insert_warnings:
+                        nodes.append(TransparentNode(f'\n> {warnings_mapping[self.__dest_lang]}\n'))
+                        self.__insert_warnings = False
 
                 else:  # 普通文字
                     nodes.append(SolidNode(line))
@@ -146,7 +147,7 @@ class MdTranslater:
         """
         执行数据的拆分翻译组装
         """
-        self.dest_lang = dest_lang
+        self.__dest_lang = dest_lang
         nodes = self.generate_nodes(src_lines)
         # 待翻译md文本
         src_md_text = ''
@@ -178,13 +179,13 @@ class MdTranslater:
         """
         执行文件的读取、翻译、写入
         """
-        dest_filename = os.path.join(self.base_dir, f'{self.src_filename_body}.{dest_lang}.md')
-        if not os.path.exists(self.src_filename):
-            print('src file ', self.src_filename, ' not exist! skip.')
+        dest_filename = os.path.join(self.__base_dir, f'{self.__src_filename_body}.{dest_lang}.md')
+        if not os.path.exists(self.__src_filename):
+            print('src file ', self.__src_filename, ' not exist! skip.')
             return
         with logging_lock:
-            print(threading.current_thread().name, ' is translating file ', self.src_filename, ' to ', dest_filename)
-        with open(self.src_filename, encoding='utf-8') as src_filename_data:
+            print(threading.current_thread().name, ' is translating file ', self.__src_filename, ' to ', dest_filename)
+        with open(self.__src_filename, encoding='utf-8') as src_filename_data:
             src_lines = src_filename_data.readlines()
         if dest_lang != 'zh-tw':
             src_lines_tmp = []
@@ -192,7 +193,7 @@ class MdTranslater:
                 src_lines_tmp.append(line.replace('。', '. '))
             src_lines = src_lines_tmp
         src_lines.append('\n')
-        final_md_text = self.translate_lines(src_lines, self.src_lang, dest_lang)
+        final_md_text = self.translate_lines(src_lines, self.__src_lang, dest_lang)
         with open(dest_filename, 'w', encoding='utf-8') as outfile:
             outfile.write(final_md_text)
 
