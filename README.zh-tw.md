@@ -1,10 +1,10 @@
 # Free Markdown Translator
 
+> 警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！
+
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![made-with-javascript](https://img.shields.io/badge/Made%20with-JavaScript-1f425f.svg)](https://www.javascript.com)
 [![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
-
-> 警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！
 
 ## 簡介
 
@@ -68,9 +68,9 @@ python.exe MarkdownTranslator.py [-h] folder [folder ...]
 
 由於使用的是谷歌翻譯接口，所以目標語言需要使用ISO 639-1語言代碼，具體可以參考[List of ISO 639-1 codes - Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes)，下面給出一些常用的語言代碼
 
-| 語言名稱       | 該語言自稱            | 語言代碼 |
-|------------|------------------|------|
-| Chinese    | 漢語、汉语、华语               | zh       |
+| 語言名稱   | 該語言自稱                     | 語言代碼 |
+| ---------- | ------------------------------ | -------- |
+| Chinese    | 漢語、漢語、華語               | zh       |
 | English    | English                        | en       |
 | Japanese   | 日本語                         | ja       |
 | Spanish    | Español                        | es       |
