@@ -196,13 +196,13 @@ class MdTranslater:
                 parts = re.split(expands_pattern, line)
                 line = ''
                 for position, part in enumerate(parts):
-                    if len(part) == 0:
+                    if not part or len(part) == 0:
                         continue
                     for expands_regex in expands_regexs:
                         if re.match(expands_regex, part):
-                            if position == 1:
+                            if position == 0:
                                 part = part + ' '
-                            elif position == len(parts):
+                            elif position == len(parts) - 1:
                                 part = ' ' + part
                             else:
                                 part = ' ' + part + ' '
