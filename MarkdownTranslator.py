@@ -187,15 +187,41 @@ class MdTranslater:
             print(threading.current_thread().name, ' is translating file ', self.__src_filename, ' to ', dest_filename)
         with open(self.__src_filename, encoding='utf-8') as src_filename_data:
             src_lines = src_filename_data.readlines()
+        # 对数据进行预处理
+        src_lines = self.preprocessing(dest_lang, src_lines)
+        final_md_text = self.translate_lines(src_lines, self.__src_lang, dest_lang)
+        final_markdown = ''
+        for line in final_md_text.splitlines():
+            if dest_lang not in compact_langs:
+                parts = re.split(expands_pattern, line)
+                line = ''
+                for position, part in enumerate(parts):
+                    if len(part) == 0:
+                        continue
+                    for expands_regex in expands_regexs:
+                        if re.match(expands_regex, part):
+                            if position == 1:
+                                part = part + ' '
+                            elif position == len(parts):
+                                part = ' ' + part
+                            else:
+                                part = ' ' + part + ' '
+                            break
+                    line += part
+            final_markdown += line + '\n'
+
+        with open(dest_filename, 'w', encoding='utf-8') as outfile:
+            outfile.write(final_markdown)
+
+    def preprocessing(self, dest_lang, src_lines):
         if dest_lang != 'zh-tw':
             src_lines_tmp = []
             for line in src_lines:
-                src_lines_tmp.append(line.replace('。', '. '))
+                line = line.replace('。', '. ').replace('，', ',')
+                src_lines_tmp.append(line)
             src_lines = src_lines_tmp
         src_lines.append('\n')
-        final_md_text = self.translate_lines(src_lines, self.__src_lang, dest_lang)
-        with open(dest_filename, 'w', encoding='utf-8') as outfile:
-            outfile.write(final_md_text)
+        return src_lines
 
 
 if __name__ == '__main__':

@@ -25,14 +25,17 @@ warnings_mapping = {
 }
 # 指定目标语言
 # dest_langs = ['en','zh-tw']
-# dest_langs = ['en']
-dest_langs = warnings_mapping.keys()
-
+dest_langs = ['en']
+# dest_langs = warnings_mapping.keys()
+# 紧凑型语言，解决英语等非紧凑型语言的分隔问题
+compact_langs = ['zh-tw', 'ja']
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
-skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"',
-                  r'Hello World', r'-+', r'\|','\n']
+skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'-+', r'\|', '\n']
+# 非紧凑型语言中需要添加分隔的正则表达式
+expands_regexs = [r'`.+?`', r'".*"', r'\*\*.*?\*\*']
 # pattern = "|".join(map(re.escape, self.skipped_chars))
 pattern = "({})".format("|".join(skipped_regexs))
+expands_pattern = "({})".format("|".join(expands_regexs))
 # 文件目录下需要翻译的文档的名称
 detect_filenames = ['index', 'README', '_index']
 # markdown中Front Matter不用翻译的部分
