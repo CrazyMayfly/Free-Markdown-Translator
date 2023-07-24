@@ -1,8 +1,11 @@
 import json
+import os
 import re
+import sys
 import threading
 import urllib.parse
 import urllib.request
+
 # pip install PyExecJS
 import execjs
 
@@ -22,12 +25,14 @@ load_balancing_idx = -1
 # 应对多线程的锁，为单线程应用时无需加锁
 lock = threading.Lock()
 logging_lock = threading.Lock()
+
+
 def lbi_add_one():
     with lock:
         global load_balancing_idx
         load_balancing_idx += 1
-        with logging_lock:
-            print(f'Current url is https://translate.google.com{appendix[load_balancing_idx % len(appendix)]}')
+        # with logging_lock:
+        #     print(f'Current url is https://translate.google.com{appendix[load_balancing_idx % len(appendix)]}')
         return load_balancing_idx
 
 
@@ -47,7 +52,7 @@ class GoogleTrans(object):
 
         self.data = {
             "client": "webapp",  # 基于网页访问服务器
-            "sl": src_language,   #源语言, auto表示由谷歌自动识别
+            "sl": src_language,  # 源语言, auto表示由谷歌自动识别
             "tl": "en",  # 翻译的目标语言
             "hl": "zh-cn",  # 界面语言选中文，毕竟URL都是cn后缀了，就不装美国人了
             # dt表示要求服务器返回的数据类型
@@ -60,7 +65,11 @@ class GoogleTrans(object):
             "q": ""  # 待翻译的字符串
         }
 
-        with open('token.js', 'r', encoding='utf-8') as f:
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.abspath('.')
+        with open(os.path.join(base_path, 'token.js'), 'r', encoding='utf-8') as f:
             self.js_fun = execjs.compile(f.read())
 
         # 构建完对象以后要同步更新一下TKK值
