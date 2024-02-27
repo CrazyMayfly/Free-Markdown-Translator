@@ -22,26 +22,6 @@ Google Translate API參考[VictorZhang2014/free-google-translate: Free Google Tr
 
 ## 安裝與運行
 
-注意，本程序依賴谷歌翻譯，在中國大陸等地區需要連接代理方能使用。
-
-### 可執行程序安裝與使用
-
-可執行程序採用默認配置，配置不可更改，默認將中文翻譯為10餘種目標語言，由於我的時間精力有限，沒有將配置寫到配置文件中，若需要個性化配置請克隆源代碼後操作。
-
-1. 下載右側的發行版（MarkdownTranslator.exe）
-2. 打開系統控制台，並為控制台設置代理
-3. 在控制台中鍵入以下命令
-
-```bash
-MarkdownTranslator.exe [-h] folder [folder ...]
-```
-
-參數位置放置待翻譯的文件夾，可以添加多個文件夾，程序會自動按順序翻譯每個文件夾下的每個在配置文件中指定的文件。
-
-例如，若指定的目標語言為英語(en)、日本語(ja)，則`readme.md`文件會被翻譯到同文件夾下的`readme.en.md`,`readme.ja.md`。
-
-### 源代碼克隆與使用
-
 1. 將倉庫克隆或將源代碼下載到本地
 
 ```bash
@@ -55,6 +35,12 @@ pip install PyExecJS
 ```
 
 3. 進入代碼目錄，運行代碼
+
+```bash
+python.exe .\MarkdownTranslator.py
+```
+
+### 用法
 
 ```bash
 python.exe MarkdownTranslator.py [-h] folder [folder ...]

@@ -22,26 +22,6 @@ Google Translate API référence [Victorzhang2014 / gratuit-Google-Traduire: API
 
 ## Installation et fonctionnement
 
-Notez que ce programme dépend de la traduction de Google et doit être connecté à des agents en Chine continentale et à d'autres régions pour l'utiliser.
-
-### Installation et utilisation du programme performable
-
-La procédure exécutable est utilisée par la configuration par défaut. La configuration ne peut pas être modifiée. La traduction des chinois en plus de 10 langages cibles par défaut est que parce que mon temps et mon énergie sont limités, la configuration n'est pas écrite dans le fichier de configuration. Si vous avez besoin d'une configuration personnalisée, veuillez cloner le code source.
-
-1. Téléchargez la version de version à droite
-2. Ouvrez la console système et définissez un agent pour la console
-3. Tapez la commande suivante dans la console
-
-```bash
-MarkdownTranslator.exe [-h] folder [folder ...]
-```
-
-Mettez le dossier à traduire pour la position du paramètre, vous pouvez ajouter plusieurs dossiers. Le programme traduira automatiquement chaque dossier dans le fichier spécifié dans le fichier de configuration dans l'ordre.
-
-Par exemple, si la langue cible spécifiée est l'anglais (en), le japonais (JA), alors `readme.md` Le fichier sera traduit dans le même dossier `readme.en.md` ,, `readme.ja.md` Alors, alors
-
-### Clonage et utilisation du code source
-
 1. Téléchargez l'entrepôt ou téléchargez le code source dans la zone locale
 
 ```bash
@@ -55,6 +35,12 @@ pip install PyExecJS
 ```
 
 3. Entrez le répertoire de code, exécutez le code
+
+```bash
+python.exe .\MarkdownTranslator.py
+```
+
+### usage
 
 ```bash
 python.exe MarkdownTranslator.py [-h] folder [folder ...]
