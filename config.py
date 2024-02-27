@@ -25,7 +25,6 @@ warnings_mapping = {
 }
 # 指定目标语言
 # dest_langs = ['en','zh-tw']
-# dest_langs = ['en']
 dest_langs = warnings_mapping.keys()
 # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
 compact_langs = ['zh-tw', 'ja']

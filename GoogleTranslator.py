@@ -68,7 +68,7 @@ class GoogleTrans(object):
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
-            base_path = os.path.abspath('.')
+            base_path = os.path.abspath(os.path.dirname(__file__))
         with open(os.path.join(base_path, 'token.js'), 'r', encoding='utf-8') as f:
             self.js_fun = execjs.compile(f.read())
 
