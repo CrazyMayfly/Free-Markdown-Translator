@@ -267,7 +267,7 @@ if __name__ == '__main__':
                 start = time.time()
                 threads = []
                 for lang in waiting_to_be_translated_langs:
-                    translater = MdTranslater('zh', base_dir, detect_filename)
+                    translater = MdTranslater(src_language, base_dir, detect_filename)
                     t = threading.Thread(target=translater.translate_to, args=(lang,))
                     t.start()
                     threads.append(t)
