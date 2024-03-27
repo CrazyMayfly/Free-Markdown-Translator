@@ -2,14 +2,23 @@ import functools
 import random
 import re
 import sys
+import threading
 import time
-import urllib
 import warnings
 from typing import Tuple, Union, List
 
 import execjs
 from lxml import etree
 import requests
+
+host_url = 'https://www.bing.com/Translator'
+api_url = 'https://www.bing.com/ttranslatev3'
+headers = {
+    'Referer': host_url,
+    "User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 '
+                  'Safari/537.36',
+}
+proxies = None
 
 
 class TranslatorError(Exception):
@@ -54,23 +63,12 @@ class Tse:
                 _uuid += '-'
         return _uuid
 
-    @staticmethod
-    def get_headers(host_url: str,
-                    if_referer_for_host: bool = True
-                    ) -> dict:
-        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36'
-        headers = {
-            'Referer' if if_referer_for_host else 'Host': host_url,
-            "User-Agent": user_agent,
-        }
-        return headers
-
     def check_language(self,
                        from_language: str,
                        to_language: str,
                        language_map: dict,
-                       output_auto: str = 'auto',
-                       output_zh: str = 'zh',
+                       output_auto: str = 'auto-detect',
+                       output_zh: str = 'zh-Hans',
                        if_check_lang_reverse: bool = True,
                        ) -> Tuple[str, str]:
         from_language = output_auto if from_language in self.auto_pool else from_language
@@ -153,21 +151,16 @@ class Tse:
 class Bing(Tse):
     def __init__(self):
         super().__init__()
-        self.begin_time = time.time()
-        self.host_url = 'https://www.bing.com/Translator'
-        self.api_url = 'https://www.bing.com/ttranslatev3'
-        self.headers = self.get_headers(self.host_url)
-        self.language_map = None
-        self.proxies = None
-        self.session = None
-        self.tk = None
-        self.ig_iid = None
-        self.query_count = 0
-        self.output_auto = 'auto-detect'
-        self.output_zh = 'zh-Hans'
-        self.sleep_seconds = 0
-        self.length_limit = 1000
-        self.updated = False
+        self.__begin_time = time.time()
+        self.__language_map = None
+        self.__session = None
+        self.__tk = None
+        self.__ig_iid = None
+        self.__query_count = 0
+        self.__sleep_seconds = 0
+        self.__length_limit = 1000
+        self.__updated = False
+        self.__update_lock = threading.Lock()
 
     @Tse.debug_language_map
     def get_language_map(self, et) -> dict:
@@ -204,22 +197,20 @@ class Bing(Tse):
         """
         print(f'trans {query_text}')
         self.try_update_states()
-        from_language, to_language = self.check_language(from_language, to_language, self.language_map,
-                                                         output_zh=self.output_zh, output_auto=self.output_auto)
+        from_language, to_language = self.check_language(from_language, to_language, self.__language_map)
         payload = {
             'text': query_text,
             'fromLang': from_language,
             'to': to_language,
             'tryFetchingGenderDebiasedTranslations': 'true'
         }
-        payload = {**payload, **self.tk}
-        api_url_param = f'?isVertical=1&&IG={self.ig_iid["ig"]}&IID={self.ig_iid["iid"]}'
-        api_url = ''.join([self.api_url, api_url_param])
-        r = self.session.post(api_url, headers=self.headers, data=payload, proxies=self.proxies)
+        payload = {**payload, **self.__tk}
+        api_url_param = f'?isVertical=1&&IG={self.__ig_iid["ig"]}&IID={self.__ig_iid["iid"]}'
+        r = self.__session.post(api_url + api_url_param, headers=headers, data=payload, proxies=proxies)
         r.raise_for_status()
-        if self.sleep_seconds:
-            time.sleep(self.sleep_seconds)
-        self.query_count += 1
+        if self.__sleep_seconds:
+            time.sleep(self.__sleep_seconds)
+        self.__query_count += 1
 
         try:
             data = r.json()
@@ -262,31 +253,31 @@ class Bing(Tse):
         return pattern.sub(repl=lambda k: result_dict.get(k.group(1), ''), string=html_text)
 
     def try_update_states(self, force=False):
-        self.updated = False if force else self.updated
-        not_update_cond_freq = self.query_count < self.default_session_freq
-        not_update_cond_time = time.time() - self.begin_time < self.default_session_seconds
-        while not (self.updated and not_update_cond_freq and not_update_cond_time):
-            self.update_states()
-            not_update_cond_freq = not_update_cond_time = self.updated
+        self.__updated = False if force else self.__updated
+        not_update_cond_freq = self.__query_count < self.default_session_freq
+        not_update_cond_time = time.time() - self.__begin_time < self.default_session_seconds
+        while not (self.__updated and not_update_cond_freq and not_update_cond_time):
+            self._update_states()
+            not_update_cond_freq = not_update_cond_time = self.__updated
 
-    def update_states(self):
+    def _update_states(self):
         try:
-            self.session = requests.Session()
-            html = self.session.get(self.host_url, headers=self.headers, proxies=self.proxies).text
+            self.__session = requests.Session()
+            html = self.__session.get(host_url, headers=headers, proxies=proxies).text
             et = etree.HTML(html)
-            self.tk = self.get_tk(html)
-            self.ig_iid = self.get_ig_iid(html, et)
-            self.length_limit = self.get_length_limit(et)
-            self.language_map = self.get_language_map(et)
-            self.begin_time = time.time()
-            self.query_count = 0
-            self.updated = self.session and self.tk and self.ig_iid and self.language_map and self.length_limit
+            self.__tk = self.get_tk(html)
+            self.__ig_iid = self.get_ig_iid(html, et)
+            self.__length_limit = self.get_length_limit(et)
+            self.__language_map = self.get_language_map(et)
+            self.__begin_time = time.time()
+            self.__query_count = 0
+            self.__updated = self.__session and self.__tk and self.__ig_iid and self.__language_map and self.__length_limit
         except Exception as e:
             warnings.warn(f'UpdateError: {str(e)}.')
-            self.updated = False
+            self.__updated = False
 
 
 if __name__ == '__main__':
     bing = Bing()
     # print(bing.translate("你好，世界！"))
-    print(bing.translate('''<html>《季姬击鸡记》,<p>还有<b>另一篇文章</b>《施氏食狮史》。</p></html>'''))
+    print(bing.translate_html('''<html>《季姬击鸡记》,<p>还有<b>另一篇文章</b>《施氏食狮史》。</p></html>'''))
