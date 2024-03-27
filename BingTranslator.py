@@ -56,37 +56,14 @@ class Tse:
 
     @staticmethod
     def get_headers(host_url: str,
-                    if_api: bool = False,
-                    if_referer_for_host: bool = True,
-                    if_ajax_for_api: bool = True,
-                    if_json_for_api: bool = False,
-                    if_multipart_for_api: bool = False,
-                    if_http_override_for_api: bool = False
+                    if_referer_for_host: bool = True
                     ) -> dict:
-
         user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36'
-        url_path = urllib.parse.urlparse(host_url.strip('/')).path
-        host_headers = {
+        headers = {
             'Referer' if if_referer_for_host else 'Host': host_url,
             "User-Agent": user_agent,
         }
-        api_headers = {
-            'Origin': host_url.split(url_path)[0] if url_path else host_url,
-            'Referer': host_url,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            "User-Agent": user_agent,
-        }
-        if if_api and not if_ajax_for_api:
-            api_headers.pop('X-Requested-With')
-            api_headers.update({'Content-Type': 'text/plain'})
-        if if_api and if_json_for_api:
-            api_headers.update({'Content-Type': 'application/json'})
-        if if_api and if_multipart_for_api:
-            api_headers.pop('Content-Type')
-        if if_api and if_http_override_for_api:
-            api_headers.update({'X-HTTP-Method-Override': 'GET'})
-        return host_headers if not if_api else api_headers
+        return headers
 
     def check_language(self,
                        from_language: str,
@@ -174,16 +151,12 @@ class Tse:
 
 
 class Bing(Tse):
-    def __init__(self, server_region='EN'):
+    def __init__(self):
         super().__init__()
         self.begin_time = time.time()
-        self.host_url = None
-        self.cn_host_url = 'https://cn.bing.com/Translator'
-        self.en_host_url = 'https://www.bing.com/Translator'
-        self.server_region = server_region
-        self.api_url = None
-        self.host_headers = None
-        self.api_headers = None
+        self.host_url = 'https://www.bing.com/Translator'
+        self.api_url = 'https://www.bing.com/ttranslatev3'
+        self.headers = self.get_headers(self.host_url)
         self.language_map = None
         self.proxies = None
         self.session = None
@@ -194,6 +167,7 @@ class Bing(Tse):
         self.output_zh = 'zh-Hans'
         self.sleep_seconds = 0
         self.length_limit = 1000
+        self.updated = False
 
     @Tse.debug_language_map
     def get_language_map(self, et) -> dict:
@@ -229,17 +203,7 @@ class Bing(Tse):
         :return: str or dict
         """
         print(f'trans {query_text}')
-        use_cn_condition = False
-        self.host_url = self.cn_host_url if use_cn_condition else self.en_host_url
-        self.api_url = self.host_url.replace('Translator', 'ttranslatev3')
-        self.host_headers = self.get_headers(self.host_url, if_api=False)
-        self.api_headers = self.get_headers(self.host_url, if_api=True)
-        not_update_cond_freq = self.query_count % self.default_session_freq != 0
-        not_update_cond_time = time.time() - self.begin_time < self.default_session_seconds
-        if not (
-                self.session and self.language_map and not_update_cond_freq and not_update_cond_time and self.tk and self.ig_iid):
-            self.refresh()
-
+        self.try_update_states()
         from_language, to_language = self.check_language(from_language, to_language, self.language_map,
                                                          output_zh=self.output_zh, output_auto=self.output_auto)
         payload = {
@@ -251,7 +215,7 @@ class Bing(Tse):
         payload = {**payload, **self.tk}
         api_url_param = f'?isVertical=1&&IG={self.ig_iid["ig"]}&IID={self.ig_iid["iid"]}'
         api_url = ''.join([self.api_url, api_url_param])
-        r = self.session.post(api_url, headers=self.host_headers, data=payload, proxies=self.proxies)
+        r = self.session.post(api_url, headers=self.headers, data=payload, proxies=self.proxies)
         r.raise_for_status()
         if self.sleep_seconds:
             time.sleep(self.sleep_seconds)
@@ -297,15 +261,29 @@ class Bing(Tse):
         result_dict = {sentence_list[i]: f'>{lines[i]}<' for i in range(len(lines))}
         return pattern.sub(repl=lambda k: result_dict.get(k.group(1), ''), string=html_text)
 
-    def refresh(self):
-        self.begin_time = time.time()
-        self.session = requests.Session()
-        html = self.session.get(self.host_url, headers=self.host_headers, proxies=self.proxies).text
-        et = etree.HTML(html)
-        self.tk = self.get_tk(html)
-        self.ig_iid = self.get_ig_iid(html, et)
-        self.length_limit = self.get_length_limit(et)
-        self.language_map = self.get_language_map(et)
+    def try_update_states(self, force=False):
+        self.updated = False if force else self.updated
+        not_update_cond_freq = self.query_count < self.default_session_freq
+        not_update_cond_time = time.time() - self.begin_time < self.default_session_seconds
+        while not (self.updated and not_update_cond_freq and not_update_cond_time):
+            self.update_states()
+            not_update_cond_freq = not_update_cond_time = self.updated
+
+    def update_states(self):
+        try:
+            self.session = requests.Session()
+            html = self.session.get(self.host_url, headers=self.headers, proxies=self.proxies).text
+            et = etree.HTML(html)
+            self.tk = self.get_tk(html)
+            self.ig_iid = self.get_ig_iid(html, et)
+            self.length_limit = self.get_length_limit(et)
+            self.language_map = self.get_language_map(et)
+            self.begin_time = time.time()
+            self.query_count = 0
+            self.updated = self.session and self.tk and self.ig_iid and self.language_map and self.length_limit
+        except Exception as e:
+            warnings.warn(f'UpdateError: {str(e)}.')
+            self.updated = False
 
 
 if __name__ == '__main__':
