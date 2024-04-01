@@ -205,6 +205,63 @@ class Bing(Tse):
             'tryFetchingGenderDebiasedTranslations': 'true'
         }
         payload = {**payload, **self.__tk}
+        if len(query_text) <= self.__length_limit:
+            return self._call_trans_api(payload)
+        else:
+            return self._translate_long_text(payload, query_text)
+
+    def _translate_long_text(self, payload, query_text) -> str:
+        """
+        This method is used to translate a long text that exceeds the length limit.
+        It breaks the text into smaller parts, translates each part, and then combines the translated parts.
+
+        Args:
+            payload (dict): The payload to be sent to the translation API. It contains the text to be translated,
+                            the source language, and the target language.
+            query_text (str): The text to be translated.
+
+        Returns:
+            str: The translated text.
+        """
+        # Initialize the lists for buffered lines and translated lines
+        buffered_lines = []
+        translated_lines = []
+        # Initialize the counter for the number of buffered characters
+        buffered_chars_num = 0
+
+        # Loop through each line in the query text
+        for line in query_text.split('\n'):
+            line_length = len(line)
+            # If the length of the line exceeds the length limit
+            if line_length > self.__length_limit:
+                translated_line = []
+                # Translate the line in parts
+                for i in range(0, line_length, self.__length_limit):
+                    payload['text'] = line[i:i + self.__length_limit]
+                    translated_line.append(self._call_trans_api(payload))
+                translated_lines.append(''.join(translated_line))
+            else:
+                # If the total length of the buffered lines and the current line exceeds the length limit
+                if buffered_chars_num + line_length > self.__length_limit:
+                    # If there are any buffered lines
+                    if buffered_chars_num > 0:
+                        payload['text'] = '\n'.join(buffered_lines)
+                        translated_lines.append(self._call_trans_api(payload))
+                        buffered_chars_num = 0
+                        buffered_lines.clear()
+                else:
+                    # Buffer the line
+                    buffered_lines.append(line)
+                    # Increase the counter for the number of buffered characters
+                    buffered_chars_num += line_length + 1
+            # If there are any buffered lines
+            if buffered_chars_num > 0:
+                payload['text'] = '\n'.join(buffered_lines)
+                translated_lines.append(self._call_trans_api(payload))
+        # Join the translated lines and return the result
+        return '\n'.join(translated_lines)
+
+    def _call_trans_api(self, payload: dict) -> str:
         api_url_param = f'?isVertical=1&&IG={self.__ig_iid["ig"]}&IID={self.__ig_iid["iid"]}'
         r = self.__session.post(api_url + api_url_param, headers=headers, data=payload, proxies=proxies)
         r.raise_for_status()
@@ -221,8 +278,8 @@ class Bing(Tse):
             ss = et.xpath('//*/textarea/text()')
             return ss[-1]
 
-    def translate_lines(self, lines: str | List, from_language: str = 'auto', to_language: str = 'en',
-                        output_text=False) -> str | List:
+    def _translate_lines(self, lines: str | List, from_language: str = 'auto', to_language: str = 'en',
+                         output_text=False) -> str | List:
         if isinstance(lines, str):
             lines = lines.split('\n')
         # 统计空行的位置并剔除
@@ -248,7 +305,7 @@ class Bing(Tse):
         """
         pattern = re.compile('>([\\s\\S]*?)<')
         sentence_list = list(set(pattern.findall(html_text)))
-        lines = self.translate_lines(sentence_list, from_language, to_language)
+        lines = self._translate_lines(sentence_list, from_language, to_language)
         result_dict = {sentence_list[i]: f'>{lines[i]}<' for i in range(len(lines))}
         return pattern.sub(repl=lambda k: result_dict.get(k.group(1), ''), string=html_text)
 
