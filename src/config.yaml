@@ -1,0 +1,78 @@
+# 控制是否在文章前面添加机器翻译的Warning
+# 源语言，auto表示自动识别
+insert_warnings: true
+src_language: auto
+# 配置目标语言及其warning，默认按照定义顺序翻译为下面语言
+warnings_mapping:
+  zh: "警告：本文由机器翻译生成，可能导致质量不佳或信息有误，请谨慎阅读！"
+  zh-TW: "警告：本文由機器翻譯生成，可能導致質量不佳或信息有誤，請謹慎閱讀！"
+  en: "Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!"
+  ja: "警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります。よくお読みください。"
+  ru: "Предупреждение: Эта статья переведена автоматически, что может привести к некачественной или неверной информации, пожалуйста, внимательно прочитайте!"
+  es: "Advertencia: este artículo está traducido por una máquina, lo que puede dar lugar a una mala calidad o información incorrecta. ¡Lea atentamente!"
+  fr: "Attention : cet article est traduit par machine, ce qui peut entraîner une mauvaise qualité ou des informations incorrectes, veuillez lire attentivement !"
+  de: "Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte sorgfältig lesen!"
+  # # 印地语
+  hi: 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!'
+  # 葡萄牙语
+  pt: 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+  # 韩语
+  ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
+
+# 指定目标语言
+target_langs:
+  - zh
+  - en
+  - ja
+  - ru
+
+# 紧凑型语言，解决英语等非紧凑型语言的分隔问题
+compact_langs:
+  - zh-TW
+  - ja
+
+# 文件目录下需要翻译的文档的名称
+src_filenames:
+  - 'index'
+  - 'README'
+  - '_index'
+
+# markdown中Front Matter不用翻译的部分
+front_matter_transparent_keys:
+  - 'date:'
+  - 'slug:'
+  - 'toc'
+  - 'image'
+  - 'comments'
+  - 'readingTime'
+  - 'menu:'
+  - '    main:'
+  - '        weight:'
+  - '        params:'
+  - '            icon:'
+  - 'links:'
+  - '    website:'
+  - '    image:'
+  - 'layout:'
+  - 'outputs:'
+  - '    - html'
+  - '    - json'
+  - 'license:'
+  - '#'
+  - 'style:'
+  - '    background:'
+  - '    color:'
+
+# Front Matter中需要以Key-Value形式翻译的部分
+front_matter_key_value_keys:
+  - 'title:'
+  - 'description:'
+  - '        name:'
+  - '  - title:'
+  - '    description:'
+
+# Front Matter中以Key-Value—Arrays形式翻译
+front_matter_key_value_array_keys:
+  - 'tags:'
+  - 'categories:'
+  - 'keywords:'

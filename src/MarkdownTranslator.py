@@ -7,10 +7,10 @@ from pathlib import Path
 
 from GoogleTranslator import GoogleTrans
 from Nodes import *
-from config import *
+from config import config
 
 
-def get_arguments():
+def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Markdown Translator, just input folders and you will get all the langs you want."
     )
@@ -32,7 +32,7 @@ class MdTranslater:
         self.__args = args
         self.__src_file: Path = ...
         self.__target_lang = ""
-        self.__insert_warnings = insert_warnings
+        self.__insert_warnings = config.insert_warnings
         self.__executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix='Translator')
 
@@ -53,7 +53,7 @@ class MdTranslater:
         :param text: 本次翻译的文本
         :return: 翻译后的文本
         """
-        parts = re.split(pattern, text)
+        parts = re.split(config.pattern, text)
         # 跳过的部分
         skipped_parts = {}
         # 需要翻译的部分
@@ -63,7 +63,7 @@ class MdTranslater:
             if len(part) == 0:
                 continue
             is_translated = True
-            for skipped_char in skipped_regexs:
+            for skipped_char in config.skipped_regexs:
                 if re.match(skipped_char, part):  # 原封不动地添加跳过的字符
                     skipped_parts.update({idx: part})
                     is_translated = False
@@ -135,7 +135,7 @@ class MdTranslater:
                 # 添加头部的机器翻译警告
                 if not is_front_matter and self.__insert_warnings:
                     nodes.append(
-                        TransparentNode(f"\n> {warnings_mapping[self.__target_lang]}\n")
+                        TransparentNode(f"\n> {config.warnings_mapping[self.__target_lang]}\n")
                     )
                     self.__insert_warnings = False
                 continue
@@ -148,11 +148,11 @@ class MdTranslater:
                 continue
 
             if is_front_matter:
-                if line.startswith(front_matter_key_value_keys):
+                if line.startswith(config.front_matter_key_value_keys):
                     nodes.append(KeyValueNode(line))
-                elif line.startswith(front_matter_transparent_keys):
+                elif line.startswith(config.front_matter_transparent_keys):
                     nodes.append(TransparentNode(line))
-                elif line.startswith(front_matter_key_value_array_keys):
+                elif line.startswith(config.front_matter_key_value_array_keys):
                     nodes.append(KeyValueArrayNode(line))
                 else:
                     nodes.append(SolidNode(line))
@@ -173,7 +173,7 @@ class MdTranslater:
                     if line.strip().startswith("# ") and self.__insert_warnings:
                         nodes.append(
                             TransparentNode(
-                                f"\n> {warnings_mapping[self.__target_lang]}\n"
+                                f"\n> {config.warnings_mapping[self.__target_lang]}\n"
                             )
                         )
                         self.__insert_warnings = False
@@ -223,14 +223,14 @@ class MdTranslater:
         if not self.__src_file.exists():
             print("src file ", self.__src_file.as_posix(), " not exist! skip.")
             return
-        dest_filename = self.__src_file.parent / f'{self.__src_file.stem}.{target_lang}.md'
+        target_file = self.__src_file.parent / f'{self.__src_file.stem}.{target_lang}.md'
 
         print(
             threading.current_thread().name,
             " is translating file ",
             self.__src_file.as_posix(),
             " to ",
-            dest_filename,
+            target_file,
         )
         with open(self.__src_file, encoding="utf-8") as src_filename_data:
             src_lines = src_filename_data.readlines()
@@ -239,13 +239,13 @@ class MdTranslater:
         final_md_text = self.__translate_lines(src_lines, self.__src_lang, target_lang)
         final_markdown = ""
         for line in final_md_text.splitlines():
-            if target_lang not in compact_langs:
-                parts = re.split(expands_pattern, line)
+            if target_lang not in config.compact_langs:
+                parts = re.split(config.expands_pattern, line)
                 line = ""
                 for position, part in enumerate(parts):
                     if not part or len(part) == 0:
                         continue
-                    for expands_regex in expands_regexs:
+                    for expands_regex in config.expands_regexs:
                         if re.match(expands_regex, part):
                             if position == 0:
                                 part = part + " "
@@ -256,9 +256,7 @@ class MdTranslater:
                             break
                     line += part
             final_markdown += line + "\n"
-
-        with open(dest_filename, "w", encoding="utf-8") as outfile:
-            outfile.write(final_markdown)
+        target_file.write_text(final_markdown, encoding="utf-8")
 
     def main(self):
         base_dirs = self.__args.folders
@@ -269,7 +267,7 @@ class MdTranslater:
             print(f"Current folder is : {base_dir}")
             # 每个文件夹下至少存在一个配置中的文件名
             has_src_file = False
-            for src_filename in src_filenames:
+            for src_filename in config.src_filenames:
                 src_file = Path(base_dir) / (src_filename + '.md')
                 print(src_file)
                 if src_file.exists():
@@ -280,27 +278,35 @@ class MdTranslater:
                 print(f"{base_dir} does not contain any file in src_filenames, Skipped!!!")
                 continue
 
-            for src_filename in src_filenames:
+            for src_filename in config.src_filenames:
                 src_file = Path(base_dir) / (src_filename + '.md')
                 if src_file.exists():
                     # 将要被翻译至的语言
-                    waiting_to_be_translated_langs = []
-                    for lang in target_langs:
+                    target_langs = []
+                    for lang in config.target_langs:
                         target_file = Path(base_dir) / f'{src_filename}.{lang}.md'
                         if target_file.exists():
                             if (input(f"{target_file.as_posix()} already exists, whether to continue(y/n): ").lower()
                                     != "y"):
                                 continue
-                        waiting_to_be_translated_langs.append(lang)
+                        target_langs.append(lang)
                     # 使用多线程翻译
-                    self.__parallel_translate(src_file, waiting_to_be_translated_langs)
+                    self.__parallel_translate(src_file, target_langs)
 
-    def __parallel_translate(self, src_file: Path, waiting_to_be_translated_langs) -> None:
+    def __parallel_translate(self, src_file: Path, target_langs: list) -> None:
+        """
+        多线程翻译
+        :param src_file:  待翻译的源文件
+        :param target_langs:  待翻译的目标语言
+        :return:
+        """
+        if len(target_langs) == 0:
+            return
         start = time.time()
         self.__src_file = src_file
         # 使用多线程翻译
         futures = [self.__executor.submit(self.translate_to, target_lang) for target_lang in
-                   waiting_to_be_translated_langs]
+                   target_langs]
         # 等待所有线程结束
         for future in futures:
             while not future.done():
@@ -308,11 +314,11 @@ class MdTranslater:
         cost = round(time.time() - start, 2)
         print(
             f"Total time cost: {cost}s, average per lang cost: "
-            f"{round(cost / len(waiting_to_be_translated_langs), 2)}s.\n"
+            f"{round(cost / len(target_langs), 2)}s.\n"
         )
 
 
 if __name__ == "__main__":
     args = get_arguments()
-    translater = MdTranslater(src_language, args)
+    translater = MdTranslater(config.src_language, args)
     translater.main()
