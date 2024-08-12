@@ -1,76 +1,167 @@
-# Kostenloser Markdown -Übersetzer
+#  Kostenloser Markdown -Übersetzer
 
 > Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte sorgfältig lesen!
 
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
-[![made-with-javascript](https://img.shields.io/badge/Made%20with-JavaScript-1f425f.svg)](https://www.javascript.com)
 [![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
 
-## Kurze Einleitung
+##  Kurze Einführung
 
-Der kostenlose Markdown -Übersetzer ist ein kostenloses Open -Source -Markdown -Dokument (im Folgenden als MD) -Translator basierend auf der API von Google Translate, mit der Ihr MD in eine beliebige Art von Sprache übersetzt werden kann.
+ Der kostenlose Markdown -Übersetzer basiert auf [ Übersetzer](https://github.com/UlionTse/translators)  Der KOSTENLOSE- und Open -Source -Dokumentenübersetzer kann Ihr Markdown -Dokument in eine beliebige Art von Sprache übersetzen.
 
-Funktion:
+ Funktion:
 
-- Übersetzen Sie MD in jede Art von Sprache
-- Es wird das ursprüngliche Format von MD nicht zerstören, während die benutzerdefinierten Übersetzungsregeln unterstützt werden
-- Unterstützen Sie multi -thread -Übersetzungen und fügen Sie gleichzeitig Lastausgleichsmechanismen hinzu, die effektiv Google Translation -Schnittstellen verwenden und den Fehler der Dokumentübersetzung vermeiden können.
-- Unterstützen Sie ein Programm, um mehrere Ordner und mehrere Dateien unter einem Ordner auszuführen, was die Bequemlichkeit erhöht
-- Unterstützung, um MDs der maschinellen Übersetzung Warnungen hinzuzufügen
+-  Übersetzen Sie das Markdown -Dokument in jede Art von Sprache
+-  Die Unterstützung enthält eine Vielzahl von Übersetzungsmotoren wie Google, Bing, Deeptl, Alibaba, Sogou, YouDao, Tencent, Baidu
+-  Grundsätzlich wird es nicht das ursprüngliche Format des Markdown -Dokuments zerstören
+-  Unterstützung bei gleichzeitiger Übersetzung
+-  Unterstützen Sie mehrere Ordner und mehrere Dateien unter einem Ordner, was für bestimmte Szenen sehr bequem ist
+-  Unterstützung, um dem Markdown -Dokument der maschinellen Übersetzung Warnungen hinzuzufügen
 
-Google Übersetzungs -API -Referenz [Victorzhang2014/kostenlos-Google-Übersetzung: Kostenlose Google Translator API kostenlose Google Translation (Github.com)](https://github.com/VictorZhang2014/free-google-translate) Diese Programmreferenz [So verwenden Sie translate.google.cn kostenlose Google -Übersetzungs -Website, um das gesamte Markdown -Dokument, V2 Modified Version (Knightli.com), zu übersetzen.](https://www.knightli.com/zh-tw/2022/04/24/免費-google-翻譯-整篇-markdown-文檔-修改版/) 
+ Referenz für dieses Programm [ So verwenden Sie translate.google.cn kostenlose Google -Übersetzungs -Website, um das gesamte Markdown -Dokument, V2 Modified Version (Knightli.com), zu übersetzen.](https://www.knightli.com/zh-tw/2022/04/24/免費-google-翻譯-整篇-markdown-文檔-修改版/) 
 
-## Installation und Betrieb
+##  Installation und Betrieb
 
-1. Laden Sie das Lagerhaus herunter oder laden Sie den Quellcode in die Region herunter
+ Beachten Sie, dass Sie, wenn Sie Google Translation und andere Übersetzungsmotoren verwenden, die keine Dienste auf dem chinesischen Festland erbracht haben, möglicherweise Agenten auf dem chinesischen Festland und anderen Regionen verbinden, um sie normal zu nutzen.
 
-```bash
-git clone git@github.com:AprilInJuly/Free-Markdown-Translator.git
-```
+ Das ausführbare Programm verwendet das gleiche Verzeichnis im selben Verzeichnis `config.yaml`  Die Datei wird als Konfigurationsdatei verwendet, sollte `config.yaml`  Verwenden Sie beim Fehlen die Standardkonfiguration, Konfigurationsdetails und finden Sie den Inhalt des Abschnitts.
 
-2. Softwarepaket installieren `PyExecJS` 
-
-```bash
-pip install PyExecJS
-```
-
-3. Geben Sie das Code -Verzeichnis ein, führen Sie den Code aus
+1.  Laden Sie die Release -Version rechts herunter
+2.  Nach der Dekompression verdoppeln Sie das Startprogramm und geben Sie dann den Pfad des Markdown -Dokuments oder den Pfad des Ordners zur Übersetzung ein
+3.  Oder verwenden Sie Befehle in der Konsole, um sie zu übersetzen
 
 ```bash
-python.exe .\MarkdownTranslator.py
+usage: MarkdownTranslator.exe [-h] [-f file/folder [file/folder ...]]
+
+Markdown translator, which translates markdown documents to target languages
+you want.
+
+options:
+  -h, --help            show this help message and exit
+  -f file/folder [file/folder ...]
+                        the markdown documents or folders to translate.
 ```
 
-### Verwendung
+ Platzieren Sie die Dateien oder Ordner, die in die Parameterposition übersetzt werden sollen, und das Programm können die in der Konfigurationsdatei angegebene Datei in den einzelnen Ordnern automatisch übersetzen.
 
-```bash
-python.exe MarkdownTranslator.py [-h] folder [folder ...]
+ Zum Beispiel, wenn die angegebene Zielsprache Englisch (EN), Japanisch (JA) ist, dann `readme.md`  Die Datei wird in denselben Ordner übersetzt `readme.en.md`  ,,,, `readme.ja.md`  Dann dann
+
+##  Konfiguration
+
+ Bitte verwenden Sie das gleiche Verzeichnis wie das ausführbare Programm `config.yaml`  Konfiguration, verwandt `yaml`  Zur Beschreibung des Textformats finden Sie unter: [ Was ist Yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml) 
+
+1.  `insert_warnings`  : Kontrolle, ob von der Maschine vor dem Dokument übersetztes Warnungen hinzugefügt werden soll
+
+2.  `src_language`  : Geben Sie die Quellsprache an, auto zeigt an, dass Google automatisch identifiziert
+
+3.  `warnings_mapping`  : Der spezifische Inhalt der entsprechenden Sprache wird durch die maschinelle Übersetzungswarnung übersetzt
+
+4.  `target_langs`  : Die Zielsprache, die übersetzt werden muss
+
+5.  `src_filenames`  : Der Name des Markdown -Dokuments, das im Dateiverzeichnis automatisch erkannt und übersetzt werden muss
+
+6.  `compact_langs`  : Kompakte Sprache, Lösung der Trennung von nicht kompakten Sprache wie Englisch
+
+7.  `front_matter_transparent_keys`  : Markdowns Front Materie muss keine Teile übersetzen
+
+8.  `front_matter_key_value_keys`  : Front Materie muss der Schlüssel sein- Wertformularübersetzungsteil
+
+9.  `front_matter_key_value_array_keys`  : Front Materie- Wert- Arrays bilden Übersetzung
+
+ Beispielkonfigurationsdatei:
+
+```yaml
+# 控制是否在文章前面添加机器翻译的Warning
+# 源语言,auto表示自动识别
+insert_warnings: true
+src_language: auto
+
+# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+translator: google
+
+# 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
+warnings_mapping:
+  zh:  "警告：本文由机器翻译生成,可能导致质量不佳或信息有误,请谨慎阅读！" 
+  zh-TW:  "警告：本文由機器翻譯生成,可能導致質量不佳或信息有誤,請謹慎閱讀！" 
+  en:  "Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!" 
+  ja:  "警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります. よくお読みください. " 
+  ru:  "Предупреждение: Эта статья переведена автоматически, что может привести к некачественной или неверной информации, пожалуйста, внимательно прочитайте!" 
+  es:  "Advertencia: este artículo está traducido por una máquina, lo que puede dar lugar a una mala calidad o información incorrecta. ¡Lea atentamente!" 
+  fr:  "Attention : cet article est traduit par machine, ce qui peut entraîner une mauvaise qualité ou des informations incorrectes, veuillez lire attentivement !" 
+  de:  "Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte sorgfältig lesen!" 
+  # # 印地语
+  hi: 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!'
+  # 葡萄牙语
+  pt: 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+  # 韩语
+  ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
+
+# 指定目标语言
+target_langs:
+  - zh
+  - en
+  - ja
+  - ru
+
+# 紧凑型语言,解决英语等非紧凑型语言的分隔问题
+compact_langs:
+  - zh-TW
+  - ja
+
+# 文件目录下需要翻译的文档的名称
+src_filenames:
+  - 'index'
+  - 'README'
+  - '_index'
+
+# markdown中Front Matter不用翻译的部分
+front_matter_transparent_keys:
+  - 'date:'
+  - 'slug:'
+  - 'toc'
+  - 'image'
+  - 'comments'
+  - 'readingTime'
+  - 'menu:'
+  - '    main:'
+  - '        weight:'
+  - '        params:'
+  - '            icon:'
+  - 'links:'
+  - '    website:'
+  - '    image:'
+  - 'layout:'
+  - 'outputs:'
+  - '    - html'
+  - '    - json'
+  - 'license:'
+  - '#'
+  - 'style:'
+  - '    background:'
+  - '    color:'
+
+# Front Matter中需要以Key-Value形式翻译的部分
+front_matter_key_value_keys:
+  - 'title:'
+  - 'description:'
+  - '        name:'
+  - '  - title:'
+  - '    description:'
+
+# Front Matter中以Key-Value—Arrays形式翻译
+front_matter_key_value_array_keys:
+  - 'tags:'
+  - 'categories:'
+  - 'keywords:'
 ```
 
-Wenn Sie den Ordner für die Parameterposition übersetzt werden, können Sie mehrere Ordner hinzufügen. Das Programm übersetzt automatisch jeden Ordner in der in der Konfigurationsdatei angegebenen Datei in der Reihenfolge.
+###  Details zur Konfiguration der Zielsprachenkonfiguration
 
-Zum Beispiel, wenn die angegebene Zielsprache Englisch (EN), Japanisch (JA) ist, dann `readme.md` Die Datei wird in denselben Ordner übersetzt `readme.en.md` ,,,, `readme.ja.md` Dann dann
+ Die Zielsprache muss mit ISO 639 verwendet werden- 1 Sprachcode, Sie können sich darauf verweisen, um Details zu erhalten [ Liste der ISO 639- 1 Codes- Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes)  Hier sind einige häufig verwendete Sprachcode
 
-## Aufbau
-
-Bitte um `config.py` Aufbau
-
-1.  `insert_warnings` : Steuer, ob maschinelle Übersetzung vor dem Artikel hinzugefügt werden soll
-2.  `src_language` : Geben Sie die Quellsprache an, auto zeigt an, dass Google automatisch identifiziert
-3.  `warnings_mapping` : Konfigurieren Sie die Taronierung der Zielsprache
-4.  `dest_langs` : Konfigurieren Sie die Zielsprache, Sie können die Zielsprache manuell angeben oder sie können sie direkt verwenden `warnings_mapping` Die Zielsprache in der Konfiguration wird in der Reihenfolge der Definition übersetzt
-5.  `skipped_regexs` : Geben Sie den regulären Ausdruck des Zeichens an, um die Übersetzung zu überspringen
-6.  `detect_filenames` : Der Name des MD -Dokuments, das im Dateiverzeichnis übersetzt werden muss
-7.  `front_matter_transparent_keys` : Markdowns Front Materie muss keine Teile übersetzen
-8.  `front_matter_key_value_keys` : Front Materie muss der Schlüssel sein-Wertformularübersetzungsteil
-9.  `front_matter_key_value_array_keys` : Front Materie-Wert -Rrays Formatübersetzung
-
-### Details zur Konfiguration der Zielsprachenkonfiguration
-
-Da die Google -Übersetzungsschnittstelle verwendet wird, muss die Zielsprache von ISO 639 verwendet werden-1 Sprachcode, Sie können sich darauf verweisen, um Details zu erhalten [Liste der ISO 639-1 Codes- Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) Hier sind einige häufig verwendete Sprachcode
-
-| Sprache Name| Diese Sprache behauptet an| Sprachcode|
-| ---------- | ------------------------------ | -------- |
-| Chinesisch| Chinesisch, Chinesisch, Chinesisch| Zh|
+| Sprachname| Diese Sprache behauptet an| Sprachcode|
+|----------|------------------------------|--------|
+| chinesisch| Chinesisch, Chinesisch, Chinesisch| Zh|
 | ENGLISCH| ENGLISCH| En|
 | japanisch| japanisch| Ja|
 | Spanisch| Español| Es|

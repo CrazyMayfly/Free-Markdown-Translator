@@ -1,84 +1,175 @@
-# 無料のマークダウン翻訳者
+#  無料のマークダウン翻訳者
 
 > 警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります。よくお読みください。
 
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
-[![made-with-javascript](https://img.shields.io/badge/Made%20with-JavaScript-1f425f.svg)](https://www.javascript.com)
 [![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
 
-## 簡単な紹介
+##  簡単な紹介
 
-Free Markdown Translatorは、Google Translate APIに基づいた無料のオープンソースMarkdownドキュメント（以下MDと呼ばれる）翻訳者であり、MDをあらゆるタイプの言語に翻訳できます。
+ 無料のマークダウン翻訳者はに基づいています[ 翻訳者](https://github.com/UlionTse/translators) 無料およびオープンソースのマークダウンドキュメント翻訳者は、マークダウンドキュメントをあらゆるタイプの言語に翻訳できます。
 
-関数：
+ 関数：
 
-- MDをあらゆるタイプの言語に変換します
-- カスタム翻訳ルールをサポートしながら、MDの元の形式を破壊することはありません
-- マルチスレッド翻訳をサポートし、同時に負荷分散メカニズムを追加します。これにより、Google翻訳インターフェイスを効果的に使用し、ドキュメント翻訳の障害を回避できます。
-- 1つのフォルダーの下で複数のフォルダーと複数のファイルを実行するプログラムをサポートすると、利便性が向上します
-- 機械翻訳のMDに警告を追加するためのサポート
+-  Markdownドキュメントをあらゆるタイプの言語に翻訳します
+-  サポートには、Google、Bing、Deepl、Alibaba、Sogou、Youdao、Tencent、Baiduなどのさまざまな翻訳エンジンが含まれています
+-  基本的に、マークダウンドキュメントの元の形式を破壊しません
+-  同時翻訳をサポートします
+-  フォルダーの下で複数のフォルダーと複数のファイルをサポートします。これは、特定のシーンに非常に便利です
+-  機械翻訳のマークダウンドキュメントに警告を追加するためのサポート
 
-Google翻訳APIリファレンス[victorzhang2014/free-グーグル-翻訳：無料のGoogle翻訳者API無料Google翻訳（github.com）](https://github.com/VictorZhang2014/free-google-translate)このプログラムリファレンス[Translate.google.cn無料のGoogle翻訳Webサイトの使用方法Markdownドキュメント全体を翻訳するために、V2 Modifiedバージョン（Knightli.com）](https://www.knightli.com/zh-tw/2022/04/24/免費-google-翻譯-整篇-markdown-文檔-修改版/)
+ このプログラムのリファレンス[ Translate.google.cn無料のGoogle翻訳Webサイトの使用方法Markdownドキュメント全体を翻訳するために、V2 Modifiedバージョン（Knightli.com）](https://www.knightli.com/zh-tw/2022/04/24/免費-google-翻譯-整篇-markdown-文檔-修改版/)
 
-## インストールと操作
+##  インストールと操作
 
-1. 倉庫をダウンロードするか、ソースコードをローカルエリアにダウンロードしてください
+ 中国本土でサービスを提供していないGoogle翻訳や他の翻訳エンジンを使用する場合は、中国本土や他の地域のエージェントを接続して正常に使用する必要がある場合があることに注意してください。
 
-```bash
-git clone git@github.com:AprilInJuly/Free-Markdown-Translator.git
-```
+ 実行可能プログラムは、同じディレクトリの下に同じディレクトリを使用します`config.yaml` ファイルは構成ファイルとして使用されます、必要です`config.yaml` 欠落したら、デフォルトの構成、構成の詳細を使用して、セクションのコンテンツを参照してください。
 
-2. ソフトウェアパッケージをインストールします`PyExecJS`
-
-```bash
-pip install PyExecJS
-```
-
-3. コードディレクトリを入力し、コードを実行します
+1.  右側のリリースバージョンをダウンロードします
+2.  減圧後、スタートアッププログラムをダブルクリックしてから、マークダウンドキュメントのパスまたは翻訳用のパスを入力します
+3.  または、コンソール内のコマンドを使用して翻訳します
 
 ```bash
-python.exe .\MarkdownTranslator.py
+usage: MarkdownTranslator.exe [-h] [-f file/folder [file/folder ...]]
+
+Markdown translator, which translates markdown documents to target languages
+you want.
+
+options:
+  -h, --help            show this help message and exit
+  -f file/folder [file/folder ...]
+                        the markdown documents or folders to translate.
 ```
 
-### 使用法
+ パラメーター位置に翻訳するファイルまたはフォルダーを配置すると、プログラムは各フォルダーの構成ファイルに指定されたファイルを順番に自動的に翻訳できます。
 
-```bash
-python.exe MarkdownTranslator.py [-h] folder [folder ...]
+ たとえば、指定されたターゲット言語が英語（EN）、日本語（JA）の場合、`readme.md` ファイルは同じフォルダーに翻訳されます`readme.en.md` 、、、、`readme.ja.md` 次に、
+
+##  構成
+
+ 実行可能ファイルプログラムと同じディレクトリを使用してください`config.yaml` 構成、関連`yaml` テキスト形式の説明については、次を参照してください。[ Yamlとは何ですか？](https://www.redhat.com/en/topics/automation/what-is-yaml)
+
+1. `insert_warnings` ：ドキュメントの前で機械によって翻訳された警告を追加するかどうかを制御する
+
+2. `src_language` ：ソース言語を指定し、AutoはGoogleが自動的に識別することを示します
+
+3. `warnings_mapping` ：対応する言語の特定の内容は、機械翻訳警告によって翻訳されます
+
+4. `target_langs` ：翻訳する必要があるターゲット言語
+
+5. `src_filenames` ：ファイルディレクトリで自動的に検出および翻訳する必要があるマークダウンドキュメントの名前
+
+6. `compact_langs` ：コンパクトな言語、英語などの非コンパクト言語の分離を解決する
+
+7. `front_matter_transparent_keys` ：マークダウンのフロントマターは部品を翻訳する必要はありません
+
+8. `front_matter_key_value_keys` ：フロントマターはキーである必要があります- 値フォーム翻訳部品
+
+9. `front_matter_key_value_array_keys` ：フロントマター- 価値- 翻訳フォームの配列
+
+ 構成ファイルの例：
+
+```yaml
+# 控制是否在文章前面添加机器翻译的Warning
+# 源语言,auto表示自动识别
+insert_warnings: true
+src_language: auto
+
+# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+translator: google
+
+# 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
+warnings_mapping:
+  zh: "警告：本文由机器翻译生成,可能导致质量不佳或信息有误,请谨慎阅读！"
+  zh-TW: "警告：本文由機器翻譯生成,可能導致質量不佳或信息有誤,請謹慎閱讀！"
+  en: "Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!"
+  ja: "警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります. よくお読みください. "
+  ru: "Предупреждение: Эта статья переведена автоматически, что может привести к некачественной или неверной информации, пожалуйста, внимательно прочитайте!"
+  es: "Advertencia: este artículo está traducido por una máquina, lo que puede dar lugar a una mala calidad o información incorrecta. ¡Lea atentamente!"
+  fr: "Attention : cet article est traduit par machine, ce qui peut entraîner une mauvaise qualité ou des informations incorrectes, veuillez lire attentivement !"
+  de: "Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte sorgfältig lesen!"
+  # # 印地语
+  hi: 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!'
+  # 葡萄牙语
+  pt: 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+  # 韩语
+  ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
+
+# 指定目标语言
+target_langs:
+  - zh
+  - en
+  - ja
+  - ru
+
+# 紧凑型语言,解决英语等非紧凑型语言的分隔问题
+compact_langs:
+  - zh-TW
+  - ja
+
+# 文件目录下需要翻译的文档的名称
+src_filenames:
+  - 'index'
+  - 'README'
+  - '_index'
+
+# markdown中Front Matter不用翻译的部分
+front_matter_transparent_keys:
+  - 'date:'
+  - 'slug:'
+  - 'toc'
+  - 'image'
+  - 'comments'
+  - 'readingTime'
+  - 'menu:'
+  - '    main:'
+  - '        weight:'
+  - '        params:'
+  - '            icon:'
+  - 'links:'
+  - '    website:'
+  - '    image:'
+  - 'layout:'
+  - 'outputs:'
+  - '    - html'
+  - '    - json'
+  - 'license:'
+  - '#'
+  - 'style:'
+  - '    background:'
+  - '    color:'
+
+# Front Matter中需要以Key-Value形式翻译的部分
+front_matter_key_value_keys:
+  - 'title:'
+  - 'description:'
+  - '        name:'
+  - '  - title:'
+  - '    description:'
+
+# Front Matter中以Key-Value—Arrays形式翻译
+front_matter_key_value_array_keys:
+  - 'tags:'
+  - 'categories:'
+  - 'keywords:'
 ```
 
-フォルダーをパラメーター位置用に翻訳するように配置すると、複数のフォルダーを追加できます。プログラムは、構成ファイルで指定されたファイル内の各フォルダーを順番に自動的に変換します。
+###  ターゲット言語構成の詳細
 
-たとえば、指定されたターゲット言語が英語（EN）、日本語（JA）の場合、`readme.md`ファイルは同じフォルダーに翻訳されます`readme.en.md`、、、、`readme.ja.md`次に、
-
-## 構成
-
-でお願いします`config.py`構成
-
-1. `insert_warnings`：記事の前に機械翻訳を追加するかどうかを制御する
-2. `src_language`：ソース言語を指定し、AutoはGoogleが自動的に識別することを示します
-3. `warnings_mapping`：ターゲット言語のタロンを構成します
-4. `dest_langs`：ターゲット言語の構成、ターゲット言語を手動で指定するか、直接使用できます`warnings_mapping`構成内のターゲット言語は、定義の順に翻訳されます
-5. `skipped_regexs`：翻訳をスキップするためにキャラクターの正規表現を指定します
-6. `detect_filenames`：ファイルディレクトリに翻訳する必要があるMDドキュメントの名前
-7. `front_matter_transparent_keys`：マークダウンのフロントマターは部品を翻訳する必要はありません
-8. `front_matter_key_value_keys`：フロントマターはキーである必要があります-値フォーム翻訳部品
-9. `front_matter_key_value_array_keys`： フロントの問題-値-rrays形式の翻訳
-
-### ターゲット言語構成の詳細
-
-Google翻訳インターフェイスが使用されるため、ターゲット言語はISO 639で使用する必要があります-1言語コード、詳細については参照できます[ISO 639のリスト-1つのコード- ウィキペディア](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes)、ここにいくつかの一般的に使用される言語コードがあります
+ ターゲット言語はISO 639を使用して使用する必要があります- 1言語コード、詳細については参照できます[ ISO 639のリスト- 1つのコード- ウィキペディア](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) 、ここにいくつかの一般的に使用される言語コードがあります
 
 | 言語名| この言語は主張しています| 言語コード|
-| ---------- | ------------------------------ | -------- |
+|----------|------------------------------|--------|
 | 中国語| 中国語、中国語、中国語| Zh|
 | 英語| 英語| en|
-| 日本| 日本| JA|
-| スペイン語| スペイン語| es|
+| 日本語| 日本語| JA|
+| スペイン語| español| es|
 | ロシア| 暗い| ru|
 | フランス語| フランサイス| fr|
-| ドイツ人| ドイツ| de|
+| ドイツ語| ドイツ| de|
 | アラビア語| 暗い| ar|
-| ヒンディー語| 暗い| やあ|
+| ヒンディー語| 暗い| こんにちは|
 | ポルトガル語| ポルトガグ| pt|
 | 韓国語| 、 /韓国、北朝鮮말 /조선말| KO|
 
