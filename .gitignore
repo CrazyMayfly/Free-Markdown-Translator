@@ -153,6 +153,7 @@ dmypy.json
 cython_debug/
 
 test*
+src/build
 
 blogHelper.py
 # PyCharm
