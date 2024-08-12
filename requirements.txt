@@ -2,3 +2,4 @@ translators~=5.9.0
 PyYAML~=6.0.2
 requests~=2.31.0
 lxml~=5.1.0
+colorlog~=6.8.2
