@@ -153,6 +153,7 @@ class MdTranslater:
         final_markdown = ""
         for line in final_md_text.splitlines():
             if target_lang in config.compact_langs:
+                final_markdown += line + "\n"
                 continue
             parts = re.split(config.expands_pattern, line)
             line = ""
