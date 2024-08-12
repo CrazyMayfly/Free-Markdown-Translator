@@ -26,7 +26,7 @@ warnings_mapping = {
 }
 # 指定目标语言
 # dest_langs = ['en','zh-TW']
-dest_langs = warnings_mapping.keys()
+target_langs = warnings_mapping.keys()
 # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
 compact_langs = ['zh-TW', 'ja']
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
@@ -37,7 +37,7 @@ expands_regexs = [r'`[^`]+?`', r'".*?"', r'\*\*.*?\*\*', r'!\[.*?\]\(.*?\)', r'\
 pattern = "({})".format("|".join(skipped_regexs))
 expands_pattern = "({})".format("|".join(expands_regexs))
 # 文件目录下需要翻译的文档的名称
-detect_filenames = ['index', 'README', '_index']
+src_filenames = ['index', 'README', '_index']
 # markdown中Front Matter不用翻译的部分
 front_matter_transparent_keys = ('date:', 'slug:', 'toc', 'image', 'comments', 'readingTime', 'menu:', '    main:',
                                  '        weight:', '        params:', '            icon:', 'links:',
