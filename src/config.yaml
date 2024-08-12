@@ -2,6 +2,10 @@
 # 源语言，auto表示自动识别
 insert_warnings: true
 src_language: auto
+
+# 使用的翻译引擎，支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+translator: google
+
 # 配置目标语言及其warning，默认按照定义顺序翻译为下面语言
 warnings_mapping:
   zh: "警告：本文由机器翻译生成，可能导致质量不佳或信息有误，请谨慎阅读！"

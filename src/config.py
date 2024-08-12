@@ -9,8 +9,8 @@ formatter = ColoredFormatter(
     "%(blue)s%(asctime)s %(log_color)s[%(levelname)-5s]%(reset)s %(blue)s[%(threadName)s] %(log_color)s%(message)s",
     datefmt='%Y-%m-%d %H:%M:%S',
     log_colors={
-        'DEBUG': 'thin_white',
-        'INFO': 'cyan',
+        'DEBUG': 'cyan',
+        'INFO': 'white',
         'WARNING': 'yellow',
         'ERROR': 'red',
         'CRITICAL': 'bold_red',
@@ -33,12 +33,19 @@ expands_regexs = [r'`[^`]+?`', r'".*?"', r'\*\*.*?\*\*', r'!\[.*?\]\(.*?\)', r'\
 pattern = "({})".format("|".join(skipped_regexs))
 expands_pattern = "({})".format("|".join(expands_regexs))
 
+# 支持的翻译引擎
+SUPPORTED_TRANSLATORS = {"google", "baidu", "bing", "sogou", "youdao", 'niutrans', 'mymemory', 'alibaba', 'tencent',
+                         'modernmt', 'volcengine', 'iciba', 'iflytek', 'lingvanex', 'yandex', 'itranslate', 'systran',
+                         'argos', 'apertium', 'reverso', 'deepl', 'cloudtranslation', 'qqtransmart', 'translateCom',
+                         'tilde', 'qqfanyi', 'translateme'}
+
 
 @dataclass
 class Configration:
     insert_warnings: bool
     src_language: str
     warnings_mapping: dict
+    translator: str
     target_langs: list
     compact_langs: list
     skipped_regexs: list
@@ -66,6 +73,7 @@ def get_default_config() -> Configration:
     target_langs = warnings_mapping.keys()
     # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
     compact_langs = ['zh-TW', 'ja']
+    translator = "google"
     # 文件目录下需要翻译的文档的名称
     src_filenames = ['index', 'README', '_index']
     # markdown中Front Matter不用翻译的部分
@@ -81,7 +89,7 @@ def get_default_config() -> Configration:
                         target_langs=list(target_langs), compact_langs=compact_langs, skipped_regexs=skipped_regexs,
                         expands_regexs=expands_regexs, pattern=pattern, expands_pattern=expands_pattern,
                         src_filenames=src_filenames, front_matter_transparent_keys=front_matter_transparent_keys,
-                        front_matter_key_value_keys=front_matter_key_value_keys,
+                        front_matter_key_value_keys=front_matter_key_value_keys, translator=translator,
                         front_matter_key_value_array_keys=front_matter_key_value_array_keys)
 
 
@@ -101,6 +109,13 @@ def get_config(config_path: str) -> Configration:
     try:
         with config_file.open(mode='r', encoding='utf-8') as file:
             data = yaml.safe_load(file)
+        translator:str = data.get("translator")
+        if translator is None:
+            logging.warning(f"Translator not configured, use google translator.")
+            data["translator"] = "google"
+        elif translator.lower() not in SUPPORTED_TRANSLATORS:
+            logging.warning(f"Unsupported translator: {translator}, use google translator.")
+            data["translator"] = "google"
         return Configration(**data, skipped_regexs=skipped_regexs, expands_regexs=expands_regexs, pattern=pattern,
                             expands_pattern=expands_pattern)
     except Exception as e:
