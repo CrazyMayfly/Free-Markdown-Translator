@@ -1,6 +1,29 @@
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
+import logging
+from colorlog import ColoredFormatter
+
+# 创建一个自定义的日志处理器来设置日志颜色
+formatter = ColoredFormatter(
+    "%(blue)s%(asctime)s %(log_color)s[%(levelname)-5s]%(reset)s %(blue)s[%(threadName)s] %(log_color)s%(message)s",
+    datefmt='%Y-%m-%d %H:%M:%S',
+    log_colors={
+        'DEBUG': 'thin_white',
+        'INFO': 'cyan',
+        'WARNING': 'yellow',
+        'ERROR': 'red',
+        'CRITICAL': 'bold_red',
+    }
+)
+# 创建控制台处理器并设置格式
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger = logging.getLogger()
+# 设置日志级别
+logger.setLevel(logging.INFO)
+# 将处理器添加到日志记录器
+logger.addHandler(console_handler)
 
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
 skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'-+', r'\|', '\n']
@@ -43,7 +66,6 @@ def get_default_config() -> Configration:
     target_langs = warnings_mapping.keys()
     # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
     compact_langs = ['zh-TW', 'ja']
-
     # 文件目录下需要翻译的文档的名称
     src_filenames = ['index', 'README', '_index']
     # markdown中Front Matter不用翻译的部分
@@ -73,6 +95,7 @@ def get_config(config_path: str) -> Configration:
     # 如果配置文件不存在，则使用默认配置
     config_file = Path(config_path)
     if not config_file.exists() or not config_file.is_file():
+        logging.warning(f"Config file not found, use default config.")
         return get_default_config()
     # 读取配置文件
     try:
@@ -81,7 +104,7 @@ def get_config(config_path: str) -> Configration:
         return Configration(**data, skipped_regexs=skipped_regexs, expands_regexs=expands_regexs, pattern=pattern,
                             expands_pattern=expands_pattern)
     except Exception as e:
-        print(f"Failed to load config file: {config_file}, error: {e}")
+        logging.warning(f"Failed to load config file: {config_file}: {e}")
         return get_default_config()
 
 

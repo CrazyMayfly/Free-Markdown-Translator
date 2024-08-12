@@ -1,3 +1,4 @@
+import logging
 import re
 from cgitb import text
 
@@ -147,7 +148,7 @@ class KeyValueArrayNode(Node):
             self.value = '\n'.join(items)
             self.trans_lines = len(items)
         else:
-            print("Wrong format with MdTransItemKeyValueArray:", text)
+            logging.warning(f"Wrong format with MdTransItemKeyValueArray: {text}")
 
     def compose(self):
         items = self.value.split('\n')

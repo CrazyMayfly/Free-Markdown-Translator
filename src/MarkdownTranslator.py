@@ -1,6 +1,5 @@
 import argparse
 import os
-import threading
 import time
 import concurrent.futures
 from pathlib import Path
@@ -216,22 +215,13 @@ class MdTranslater:
             final_markdown += node.compose()
         return final_markdown
 
-    def translate_to(self, target_lang):
+    def __translate_to(self, target_lang):
         """
         执行文件的读取、翻译、写入
         """
-        if not self.__src_file.exists():
-            print("src file ", self.__src_file.as_posix(), " not exist! skip.")
-            return
         target_file = self.__src_file.parent / f'{self.__src_file.stem}.{target_lang}.md'
+        logging.info(f"Translating {self.__src_file.as_posix()} to {target_file.as_posix()}")
 
-        print(
-            threading.current_thread().name,
-            " is translating file ",
-            self.__src_file.as_posix(),
-            " to ",
-            target_file,
-        )
         with open(self.__src_file, encoding="utf-8") as src_filename_data:
             src_lines = src_filename_data.readlines()
         # 对数据进行预处理
@@ -262,20 +252,19 @@ class MdTranslater:
         base_dirs = self.__args.folders
         for base_dir in base_dirs:
             if not os.path.exists(base_dir):
-                print(f"{base_dir} does not exist, Skipped!!!")
+                logging.warning(f"{base_dir} does not exist, Skipped!!!")
                 continue
-            print(f"Current folder is : {base_dir}")
+            logging.info(f"Current folder is : {base_dir}")
             # 每个文件夹下至少存在一个配置中的文件名
             has_src_file = False
             for src_filename in config.src_filenames:
                 src_file = Path(base_dir) / (src_filename + '.md')
-                print(src_file)
                 if src_file.exists():
                     has_src_file = True
                     break
 
             if not has_src_file:
-                print(f"{base_dir} does not contain any file in src_filenames, Skipped!!!")
+                logging.warning(f"{base_dir} does not contain any file in src_filenames, Skipped!!!")
                 continue
 
             for src_filename in config.src_filenames:
@@ -305,14 +294,14 @@ class MdTranslater:
         start = time.time()
         self.__src_file = src_file
         # 使用多线程翻译
-        futures = [self.__executor.submit(self.translate_to, target_lang) for target_lang in
+        futures = [self.__executor.submit(self.__translate_to, target_lang) for target_lang in
                    target_langs]
         # 等待所有线程结束
         for future in futures:
             while not future.done():
                 time.sleep(0.1)
         cost = round(time.time() - start, 2)
-        print(
+        logging.info(
             f"Total time cost: {cost}s, average per lang cost: "
             f"{round(cost / len(target_langs), 2)}s.\n"
         )

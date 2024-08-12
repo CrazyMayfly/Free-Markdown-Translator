@@ -1,14 +1,13 @@
-import threading
-
+import logging
 import translators as ts
 
+MAX_RETRY = 5
 
-class GoogleTrans(object):
+
+class GoogleTrans:
     def translate(self, sourceTxt, srcLang, targetLang, retries=0):
-        print(
-            f"{threading.current_thread().name} is translating {srcLang} to {targetLang}, length={len(sourceTxt)}"
-        )
-        if retries > 5:
+        logging.debug(f"Translating {srcLang} to {targetLang}, length={len(sourceTxt)}, retries={retries}")
+        if retries >= MAX_RETRY:
             return ""
         try:
             result = ts.translate_text(
@@ -17,16 +16,15 @@ class GoogleTrans(object):
                 from_language=srcLang,
                 to_language=targetLang,
                 if_ignore_limit_of_length=True,
-                if_show_time_stat=True,
+                if_show_time_stat=False,
             )
             if result is None:
                 retries += 1
-                print("retry ", retries)
+                logging.warning(f"Translate failed, retry {retries}/{MAX_RETRY}")
                 return self.translate(sourceTxt, srcLang, targetLang, retries)
-            else:
-                return result
+            return result
         except Exception as e:
-            print(e)
             retries += 1
-            print("retry ", retries)
+            logging.error(f"Translate error, retry {retries}/{MAX_RETRY}")
+            logging.error(e)
             return self.translate(sourceTxt, srcLang, targetLang, retries)
