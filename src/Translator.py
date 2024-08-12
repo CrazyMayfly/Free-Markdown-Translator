@@ -7,9 +7,6 @@ MAX_RETRY = 5
 
 
 class Translator:
-    def __init__(self):
-        logging.info(f"Current translator engine is: {config.translator}")
-
     def translate(self, sourceTxt, srcLang, targetLang, retries=0):
         logging.debug(f"Translating {srcLang} to {targetLang}, length={len(sourceTxt)}, retries={retries}")
         if retries >= MAX_RETRY:

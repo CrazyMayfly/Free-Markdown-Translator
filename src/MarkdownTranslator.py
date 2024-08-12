@@ -1,5 +1,4 @@
 import argparse
-import os
 import time
 import concurrent.futures
 from pathlib import Path
@@ -10,14 +9,14 @@ from config import config
 
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Markdown Translator, just input folders and you will get all the langs you want."
+        description="Markdown translator, which translates markdown documents to target languages you want."
     )
     parser.add_argument(
-        "folders",
-        metavar="folder",
+        '-f',
+        metavar="file/folder",
         type=Path,
         nargs="+",
-        help="the markdown files in folders to be translated.",
+        help="the markdown documents or folders to translate.",
     )
     return parser.parse_args()
 
@@ -25,11 +24,9 @@ def get_arguments() -> argparse.Namespace:
 class MdTranslater:
     trans = Translator()
 
-    def __init__(self, src_lang, args):
-        self.__src_lang = src_lang
+    def __init__(self, args):
         self.__args = args
         self.__src_file: Path = ...
-        self.__target_lang = ""
         self.__executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix='Translator')
 
@@ -44,7 +41,7 @@ class MdTranslater:
         src_lines.append("\n")
         return src_lines
 
-    def __generate_nodes(self, src_lines):
+    def __generate_nodes(self, src_lines, target_lang):
         """
         扫描每行，依次为每行生成节点
         """
@@ -61,9 +58,7 @@ class MdTranslater:
                 nodes.append(TransparentNode(line))
                 # 添加头部的机器翻译警告
                 if not is_front_matter and insert_warnings:
-                    nodes.append(
-                        TransparentNode(f"\n> {config.warnings_mapping[self.__target_lang]}\n")
-                    )
+                    nodes.append(TransparentNode(f"\n> {config.warnings_mapping[target_lang]}\n"))
                     insert_warnings = False
                 continue
             if line.startswith("```"):
@@ -98,7 +93,7 @@ class MdTranslater:
                     nodes.append(TitleNode(line))
                     # 一级标题
                     if line.strip().startswith("# ") and insert_warnings:
-                        nodes.append(TransparentNode(f"\n> {config.warnings_mapping[self.__target_lang]}\n"))
+                        nodes.append(TransparentNode(f"\n> {config.warnings_mapping[target_lang]}\n"))
                         insert_warnings = False
                 else:  # 普通文字
                     nodes.append(SolidNode(line))
@@ -108,8 +103,7 @@ class MdTranslater:
         """
         执行数据的拆分翻译组装
         """
-        self.__target_lang = target_lang
-        nodes = self.__generate_nodes(src_lines)
+        nodes = self.__generate_nodes(src_lines, target_lang)
         # 待翻译md文本
         src_md_text = ""
         for node in nodes:
@@ -149,7 +143,7 @@ class MdTranslater:
             src_lines = src_filename_data.readlines()
         # 对数据进行预处理
         src_lines = self.__preprocessing(target_lang, src_lines)
-        final_md_text = self.__translate_lines(src_lines, self.__src_lang, target_lang)
+        final_md_text = self.__translate_lines(src_lines, config.src_language, target_lang)
         final_markdown = ""
         for line in final_md_text.splitlines():
             if target_lang in config.compact_langs:
@@ -199,11 +193,19 @@ class MdTranslater:
         )
 
     def main(self):
-        folders = self.__args.folders
+        folders = self.__args.f
+        if folders is None:
+            folders = [input("Please input the markdown document location: ")]
+        logging.info(f"Current translator engine is: {config.translator}")
         for folder in folders:
-            if not os.path.exists(folder):
+            folder = Path(folder)
+            if not folder.exists():
                 logging.warning(f"{folder} does not exist, Skipped!!!")
                 continue
+            if folder.is_file():
+                config.src_filenames = [folder.stem]
+                folder = folder.parent
+
             logging.info(f"Current folder is : {folder}")
             # 每个文件夹下至少存在一个配置中的文件名
             has_src_file = False
@@ -234,6 +236,5 @@ class MdTranslater:
 
 
 if __name__ == "__main__":
-    args = get_arguments()
-    translater = MdTranslater(config.src_language, args)
+    translater = MdTranslater(get_arguments())
     translater.main()

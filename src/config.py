@@ -109,7 +109,7 @@ def get_config(config_path: str) -> Configration:
     try:
         with config_file.open(mode='r', encoding='utf-8') as file:
             data = yaml.safe_load(file)
-        translator:str = data.get("translator")
+        translator: str = data.get("translator")
         if translator is None:
             logging.warning(f"Translator not configured, use google translator.")
             data["translator"] = "google"
