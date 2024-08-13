@@ -13,7 +13,7 @@ Le traducteur gratuit de la marque est basé sur [Traducteurs](https://github.co
 Fonction:
 
 - Traduire le document Markdown en tout type de langue
-- Le support contient une variété de moteurs de traduction tels que Google, Bing, Deepl, Alibaba, Sogou, Youdao, Tencent, Baidu
+- Le support contient une variété de moteurs de traduction tels que Google, Bing, Alibaba, Sogou, Youdao, Tencent, Baidu et d'autres moteurs de traduction
 - Fondamentalement, il ne détruira pas le format d'origine du document Markdown
 - Prise en charge de la traduction simultanée
 - Prise en charge de plusieurs dossiers et plusieurs fichiers dans un dossier, ce qui est très pratique pour des scènes spécifiques
@@ -49,7 +49,7 @@ Par exemple, si la langue cible spécifiée est l'anglais (en), le japonais (JA)
 
 ## Configuration
 
-Veuillez utiliser le même répertoire que le programme exécutable `config.yaml` Configuration, connexe `yaml` Les instructions du format texte peuvent être référées:[Qu'est-ce que Yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml)
+Veuillez utiliser le même répertoire que le programme exécutable `config.yaml` Configuration, connexe `yaml` Les instructions du format de texte peuvent être référées:[Qu'est-ce que Yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml)
 
 1. `insert_warnings`: Contrôlez s'il faut ajouter des avertissements traduits par la machine devant le document
 
@@ -77,7 +77,7 @@ Exemple de fichier de configuration:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
@@ -169,7 +169,7 @@ La langue cible doit utiliser le code linguistique ISO 639-1.[Liste des codes IS
 |russe|sombre|ru|
 |Français|Fransais|Frousser|
 |Allemand|Deutsch|de|
-|arabe|Sombre|Ardente|
+|arabe|Sombre|Arde|
 |hindi|Sombre|Salut|
 |portugais|Portugugs|Pt|
 |coréen|/ Corée, Corée du Nord 말 / 조선말|Ko|

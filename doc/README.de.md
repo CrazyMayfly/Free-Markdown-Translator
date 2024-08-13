@@ -13,7 +13,7 @@ Der kostenlose Markdown -Übersetzer basiert auf [Übersetzer](https://github.co
 Funktion:
 
 - Übersetzen Sie das Markdown -Dokument in jede Art von Sprache
-- Die Unterstützung enthält eine Vielzahl von Übersetzungsmotoren wie Google, Bing, Deeptl, Alibaba, Sogou, YouDao, Tencent, Baidu
+- Die Unterstützung enthält eine Vielzahl von Übersetzungsmotoren wie Google, Bing, Alibaba, Sogou, YouDao, Tencent, Baidu und andere Übersetzungsmotoren
 - Grundsätzlich wird es nicht das ursprüngliche Format des Markdown -Dokuments zerstören
 - Unterstützung bei gleichzeitiger Übersetzung
 - Unterstützen Sie mehrere Ordner und mehrere Dateien unter einem Ordner, was für bestimmte Szenen sehr bequem ist
@@ -25,7 +25,7 @@ Referenz für dieses Programm [So verwenden Sie translate.google.cn kostenlose G
 
 Beachten Sie, dass Sie, wenn Sie Google Translation und andere Übersetzungsmotoren verwenden, die keine Dienste auf dem chinesischen Festland erbracht haben, möglicherweise Agenten auf dem chinesischen Festland und anderen Regionen verbinden, um sie normal zu verwenden.
 
-Das ausführbare Programm verwendet das gleiche Verzeichnis im selben Verzeichnis `config.yaml` Die Datei wird als Konfigurationsdatei verwendet, sollte `config.yaml` Verwenden Sie beim Fehlen der Standardkonfiguration, Konfigurationsdetails und finden Sie im Inhalt des Abschnitts.
+Das ausführbare Programm verwendet das gleiche Verzeichnis im selben Verzeichnis `config.yaml` Die Datei wird als Konfigurationsdatei verwendet, sollte `config.yaml` Verwenden Sie beim Fehlen der Standardkonfiguration, Konfigurationsdetails und finden Sie in den Inhalt des Abschnitts.
 
 1. Laden Sie die Release -Version rechts herunter
 2. Nach der Dekompression verdoppeln Sie das Startprogramm und geben Sie dann den Pfad des Markdown -Dokuments oder den Pfad des Ordners zur Übersetzung ein
@@ -77,7 +77,7 @@ Beispielkonfigurationsdatei:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言

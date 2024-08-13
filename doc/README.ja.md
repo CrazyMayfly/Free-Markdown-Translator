@@ -13,7 +13,7 @@
 関数：
 
 - Markdownドキュメントをあらゆるタイプの言語に翻訳します
-- サポートには、Google、Bing、Deepl、Alibaba、Sogou、Youdao、Tencent、Baiduなどのさまざまな翻訳エンジンが含まれています
+- サポートには、Google、Bing、Alibaba、Sogou、Youdao、Tencent、Baidu、その他の翻訳エンジンなどのさまざまな翻訳エンジンが含まれています
 - 基本的に、マークダウンドキュメントの元の形式を破壊しません
 - 同時翻訳をサポートします
 - フォルダーの下で複数のフォルダーと複数のファイルをサポートします。これは、特定のシーンに非常に便利です
@@ -23,7 +23,7 @@
 
 ## インストールと操作
 
-中国本土でサービスを提供していないGoogle翻訳や他の翻訳エンジンを使用する場合は、中国本土や他の地域のエージェントを接続して正常に使用する必要がある場合があることに注意してください。
+中国本土でサービスを提供していないGoogle翻訳やその他の翻訳エンジンを使用する場合は、中国本土や他の地域のエージェントを接続して正常に使用する必要がある場合があることに注意してください。
 
 実行可能プログラムは、同じディレクトリの下に同じディレクトリを使用します`config.yaml`ファイルは構成ファイルとして使用されます、必要です`config.yaml`不足している場合は、デフォルトの構成、構成の詳細を使用して、セクションのコンテンツを参照してください。
 
@@ -43,13 +43,13 @@ options:
                         the markdown documents or folders to translate.
 ```
 
-パラメーター位置に翻訳するファイルまたはフォルダーを配置し、複数のフォルダーを追加できます。プログラムは、各フォルダーの構成ファイルで指定された各ファイルを順番に自動的に変換します。
+ファイルまたはフォルダーをパラメーター位置に翻訳するように配置し、複数のフォルダーを追加できます。プログラムは、各フォルダーの構成ファイルに指定された各ファイルを順番に自動的に変換します。
 
 たとえば、指定されたターゲット言語が英語（EN）、日本語（JA）の場合、`readme.md`ファイルは同じフォルダーに翻訳されます`readme.en.md`,`readme.ja.md`エッセンス
 
 ## 構成
 
-実行可能ファイルプログラムと同じディレクトリを使用してください`config.yaml`構成、関連`yaml`テキスト形式の指示は、次のように参照できます。[Yamlとは何ですか？](https://www.redhat.com/en/topics/automation/what-is-yaml)
+実行可能ファイルプログラムと同じディレクトリを使用してください`config.yaml`構成、関連`yaml`テキスト形式の指示は次のように参照できます。[Yamlとは何ですか？](https://www.redhat.com/en/topics/automation/what-is-yaml)
 
 1. `insert_warnings`：ドキュメントの前で機械によって翻訳された警告を追加するかどうかを制御する
 
@@ -77,7 +77,7 @@ options:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言

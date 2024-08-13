@@ -13,7 +13,7 @@ O tradutor de marcação livre é um baseado em [Tradutores](https://github.com/
 Função:
 
 - Traduzir o documento de remarcar em qualquer tipo de linguagem
-- O suporte contém uma variedade de motores de tradução, como Google, Bing, Deepl, Alibaba, Sogou, Youdao, Tencent, Baidu
+- O suporte contém uma variedade de motores de tradução, como Google, Bing, Alibaba, Sogou, Youdao, Tencent, Baidu e outros motores de tradução
 - Basicamente, ele não destruirá o formato original do documento de marcação
 - Suporte tradução simultânea
 - Suporte a várias pastas e vários arquivos em uma pasta, o que é muito conveniente para cenas específicas
@@ -25,7 +25,7 @@ Referência para este programa [Como usar o site de tradução do Google GRATUIT
 
 Observe que, se você usar o Google Translation e outros mecanismos de tradução que não prestaram serviços na China continental, pode ser necessário conectar agentes na China continental e em outras regiões para usá -los normalmente.
 
-O programa executável usa o mesmo diretório no mesmo diretório `config.yaml` O arquivo é usado como um arquivo de configuração, deve `config.yaml` Quando falta, use a configuração padrão, detalhes de configuração, consulte o conteúdo da seção.
+O programa executável usa o mesmo diretório no mesmo diretório `config.yaml` O arquivo é usado como um arquivo de configuração, deve `config.yaml` Ao não ter, use a configuração padrão, detalhes da configuração, consulte o conteúdo da seção.
 
 1. Baixe a versão de lançamento à direita
 2. Após a descompressão, clique duas vezes no programa de inicialização e digite o caminho do documento de marcação ou o caminho da pasta para tradução
@@ -49,7 +49,7 @@ Por exemplo, se o idioma de destino especificado for inglês (en), japonês (JA)
 
 ## Configuração
 
-Por favor, use o mesmo diretório que o programa executável `config.yaml` Configuração, relacionada `yaml` As instruções do formato de texto podem ser referidas:[O que é Yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml)
+Use o mesmo diretório que o programa executável `config.yaml` Configuração, relacionada `yaml` As instruções do formato de texto podem ser referidas:[O que é Yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml)
 
 1. `insert_warnings`: Controle se deve adicionar avisos traduzidos pela máquina em frente ao documento
 
@@ -77,7 +77,7 @@ Exemplo de arquivo de configuração:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
@@ -169,7 +169,7 @@ O idioma de destino precisa usar o código ISO 639-1.[Lista de códigos ISO 639-
 |russo|Destacado|ru|
 |Francês|Fransais|Fr|
 |Alemão|Deutsch|de|
-|árabe|Sombrio|Ar|
-|hindi|Sombrio|Oi|
+|árabe|Destacado|Ar|
+|hindi|Destacado|Oi|
 |Português|Portugugs|Pt|
 |coreano|/Coreano, Coréia do Norte 말/조선말|Ko|

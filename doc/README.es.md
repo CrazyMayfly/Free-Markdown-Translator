@@ -13,7 +13,7 @@ El traductor de Markdown gratuito está basado en [Traductores](https://github.c
 Función:
 
 - Traducir el documento de Markdown en cualquier tipo de idioma
-- El soporte contiene una variedad de motores de traducción como Google, Bing, Deepl, Alibaba, Sogou, Yodao, Tencent, Baidu
+- El soporte contiene una variedad de motores de traducción como Google, Bing, Alibaba, Sogou, Yodao, Tencent, Baidu y otros motores de traducción
 - Básicamente, no destruirá el formato original del documento de Markdown
 - Apoyo a la traducción concurrente
 - Admite múltiples carpetas y múltiples archivos en una carpeta, que es muy conveniente para escenas específicas
@@ -43,7 +43,7 @@ options:
                         the markdown documents or folders to translate.
 ```
 
-Coloque los archivos o carpetas para traducirse a la posición del parámetro, puede agregar varias carpetas y el programa traducirá automáticamente cada uno de los archivos especificados en el archivo de configuración en cada carpeta en orden.
+Coloque los archivos o carpetas para traducir a la posición del parámetro, puede agregar varias carpetas y el programa traducirá automáticamente cada uno de los archivos especificados en el archivo de configuración en cada carpeta en orden.
 
 Por ejemplo, si el idioma de destino especificado es inglés (EN), japonés (JA), entonces `readme.md` El archivo se traducirá a la misma carpeta `readme.en.md`,`readme.ja.md` Esencia
 
@@ -77,7 +77,7 @@ Ejemplo de archivo de configuración:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言

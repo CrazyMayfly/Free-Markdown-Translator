@@ -13,7 +13,7 @@
 기능:
 
 - Markdown 문서를 모든 유형의 언어로 변환하십시오
-- 지원에는 Google, Bing, Deepl, Alibaba, Sogou, Youdao, Tencent, Baidu와 같은 다양한 번역 엔진이 포함되어 있습니다.
+- 지원에는 Google, Bing, Alibaba, Sogou, Youdao, Tencent, Baidu 및 기타 번역 엔진과 같은 다양한 번역 엔진이 포함되어 있습니다.
 - 기본적으로 Markdown 문서의 원래 형식을 파괴하지 않습니다.
 - 동시 번역을 지원하십시오
 - 특정 장면에 매우 편리한 폴더 아래의 여러 폴더와 여러 파일을 지원합니다.
@@ -77,7 +77,7 @@ options:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言

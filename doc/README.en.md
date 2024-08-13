@@ -13,7 +13,7 @@ Free Markdown Translator is a based on [Translators](https://github.com/UlionTse
 Function:
 
 - Translate the MarkDown document into any type of language
-- Support contains a variety of translation engines such as Google, Bing, Deepl, Alibaba, SOGOU, YOUDAO, TENCENT, BAIDU
+- Support contains a variety of translation engines such as Google, Bing, Alibaba, Sogou, YOUDAO, Tencent, BAIDU and other translation engines
 - Basically, it will not destroy the original format of the Markdown document
 - Support concurrent translation
 - Support multiple folders and multiple files under a folder, which is very convenient for specific scenes
@@ -77,7 +77,7 @@ Example configuration file:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言

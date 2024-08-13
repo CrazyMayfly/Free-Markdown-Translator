@@ -13,7 +13,7 @@
 Функция:
 
 - Перевести документ Markdown на любой тип языка
-- Поддержка содержит различные переводчики, такие как Google, Bing, Deepl, Alibaba, Sogou, Youdao, Tencent, Baidu
+- Поддержка содержит множество трансляционных двигателей, таких как Google, Bing, Alibaba, Sogou, Youdao, Tencent, Baidu и другие переводчики
 - По сути, это не разрушит первоначальный формат документа Markdown
 - Поддержка параллельного перевода
 - Поддержите несколько папок и несколько файлов в папке, что очень удобно для конкретных сцен
@@ -77,7 +77,7 @@ options:
 insert_warnings: true
 src_language: auto
 
-# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎,支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
 # 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
@@ -167,7 +167,7 @@ front_matter_key_value_array_keys:
 |Японский|Японский|JA|
 |испанский|Эспаньол|Эс|
 |Русский|мрачный|Ру|
-|Французский|Fransais|Фр|
+|Французский|Fransais|Фар|
 |немецкий|Deutsch|де|
 |арабский|Мрачный|АР|
 |хинди|Мрачный|Привет|
