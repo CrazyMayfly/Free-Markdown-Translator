@@ -28,7 +28,7 @@ logger.addHandler(console_handler)
 # 支持的翻译引擎
 SUPPORTED_TRANSLATORS = {"google", "baidu", "bing", "sogou", "youdao", 'niutrans', 'mymemory', 'alibaba', 'tencent',
                          'modernmt', 'volcengine', 'iciba', 'iflytek', 'lingvanex', 'yandex', 'itranslate', 'systran',
-                         'argos', 'apertium', 'reverso', 'deepl', 'cloudtranslation', 'qqtransmart', 'translateCom',
+                         'argos', 'apertium', 'reverso', 'cloudtranslation', 'qqtransmart', 'translateCom',
                          'tilde', 'qqfanyi', 'translateme'}
 
 
