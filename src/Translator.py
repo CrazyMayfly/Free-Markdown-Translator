@@ -1,6 +1,6 @@
 import logging
-import re
 import translators as ts
+from Utils import Patterns
 from config import config
 
 MAX_RETRY = 5
@@ -37,7 +37,7 @@ class Translator:
         :param text: 本次翻译的文本
         :return: 翻译后的文本
         """
-        parts = re.split(config.pattern, text)
+        parts = Patterns.Skipped.split(text)
         # 跳过的部分
         skipped_parts = {}
         # 需要翻译的部分
@@ -46,33 +46,26 @@ class Translator:
         for part in parts:
             if len(part) == 0:
                 continue
-            is_translated = True
-            for skipped_char in config.skipped_regexs:
-                if re.match(skipped_char, part):  # 原封不动地添加跳过的字符
-                    skipped_parts.update({idx: part})
-                    is_translated = False
-                    break
-            if is_translated:
+            if Patterns.Skipped.search(part):
+                skipped_parts.update({idx: part})
+            else:
                 translated_parts.update({idx: part})
             idx += 1
+
         # 组装翻译
         text = "\n".join(translated_parts.values())
         translate = self.translate(text, src_lang, target_lang)
         # 确保api接口返回了结果
         while translate is None:
             translate = self.translate(text, src_lang, target_lang)
+
         translated_text = [line.strip(" ") for line in translate.splitlines()]
         # 更新翻译部分的内容
         for position, key in enumerate(translated_parts.keys()):
             translated_parts[key] = translated_text[position]
-        total_parts = {}
-        total_parts.update(skipped_parts)
-        total_parts.update(translated_parts)
-        translated_text = ""
-        # 拼接回字符串
-        for i in range(0, idx):
-            translated_text += total_parts[i]
-        return translated_text
+
+        total_parts = {**skipped_parts, **translated_parts}
+        return "".join(total_parts[i] for i in range(idx))
 
     def translate_in_batches(self, lines: list[str], src_lang: str, target_lang: str) -> str:
         """

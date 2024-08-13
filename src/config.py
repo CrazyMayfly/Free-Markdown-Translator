@@ -25,15 +25,6 @@ logger.setLevel(logging.INFO)
 # 将处理器添加到日志记录器
 logger.addHandler(console_handler)
 
-# 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
-skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+', r'^\.$',
-                  r'^,$', '\n']
-# 非紧凑型语言中需要添加分隔的正则表达式
-expands_regexs = [r'`[^`]+?`', r'".*?"', r'\*\*.*?\*\*', r"\[!\[.*?]\(.*?\)]\(.*?\)|!?\[.*?]\(.*?\)"]
-# pattern = "|".join(map(re.escape, self.skipped_chars))
-pattern = "({})".format("|".join(skipped_regexs))
-expands_pattern = "({})".format("|".join(expands_regexs))
-
 # 支持的翻译引擎
 SUPPORTED_TRANSLATORS = {"google", "baidu", "bing", "sogou", "youdao", 'niutrans', 'mymemory', 'alibaba', 'tencent',
                          'modernmt', 'volcengine', 'iciba', 'iflytek', 'lingvanex', 'yandex', 'itranslate', 'systran',
@@ -49,10 +40,6 @@ class Configration:
     translator: str
     target_langs: list
     compact_langs: list
-    skipped_regexs: list
-    expands_regexs: list
-    pattern: str
-    expands_pattern: str
     src_filenames: list
     front_matter_transparent_keys: tuple
     front_matter_key_value_keys: tuple
@@ -87,8 +74,7 @@ def get_default_config() -> Configration:
     # Front Matter中以Key-Value—Arrays形式翻译
     front_matter_key_value_array_keys = ('tags:', 'categories:', 'keywords:')
     return Configration(insert_warnings=insert_warnings, src_language=src_language, warnings_mapping=warnings_mapping,
-                        target_langs=list(target_langs), compact_langs=compact_langs, skipped_regexs=skipped_regexs,
-                        expands_regexs=expands_regexs, pattern=pattern, expands_pattern=expands_pattern,
+                        target_langs=list(target_langs), compact_langs=compact_langs,
                         src_filenames=src_filenames, front_matter_transparent_keys=front_matter_transparent_keys,
                         front_matter_key_value_keys=front_matter_key_value_keys, translator=translator,
                         front_matter_key_value_array_keys=front_matter_key_value_array_keys)
@@ -117,8 +103,7 @@ def get_config(config_path: str) -> Configration:
         elif translator.lower() not in SUPPORTED_TRANSLATORS:
             logging.warning(f"Unsupported translator: {translator}, use google translator.")
             data["translator"] = "google"
-        return Configration(**data, skipped_regexs=skipped_regexs, expands_regexs=expands_regexs, pattern=pattern,
-                            expands_pattern=expands_pattern)
+        return Configration(**data)
     except Exception as e:
         logging.warning(f"Failed to load config file: {config_file}: {e}")
         return get_default_config()
