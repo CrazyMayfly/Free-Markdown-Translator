@@ -1,3 +1,4 @@
+import argparse
 import time
 import concurrent.futures
 from pathlib import Path
@@ -8,11 +9,10 @@ from Utils import Patterns, get_arguments, expand_part, full_width_symbol_to_hal
 
 
 class MdTranslater:
-    trans = Translator()
+    __trans: Translator = Translator()
 
-    def __init__(self, args):
-        self.__args = args
-        self.__src_file: Path = ...
+    def __init__(self, args: argparse.Namespace):
+        self.__args: argparse.Namespace = args
         self.__executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix='Translator')
 
@@ -24,7 +24,7 @@ class MdTranslater:
         return src_lines
 
     @staticmethod
-    def __generate_nodes(src_lines, target_lang):
+    def __generate_nodes(src_lines: list[str], target_lang: str) -> list[Node]:
         """
         扫描每行，依次为每行生成节点
         """
@@ -32,17 +32,17 @@ class MdTranslater:
         # 在```包裹的代码块中
         is_code_block = False
         # 忽略翻译的部分，实际上和代码块内容差不多，只是连标识符都忽略了
-        do_not_trans = False
-        insert_warnings = config.insert_warnings
+        is_not_trans = False
+        is_insert_warnings = config.insert_warnings
         nodes = []
         for line in src_lines:
             if line.strip() == "---":
                 is_front_matter = not is_front_matter
                 nodes.append(TransparentNode(line))
                 # 添加头部的机器翻译警告
-                if not is_front_matter and insert_warnings:
+                if not is_front_matter and is_insert_warnings:
                     nodes.append(TransparentNode(f"\n> {config.warnings_mapping[target_lang]}\n"))
-                    insert_warnings = False
+                    is_insert_warnings = False
                 continue
 
             if line.startswith("```"):
@@ -51,7 +51,7 @@ class MdTranslater:
                 continue
 
             if line.startswith("__do_not_translate__"):
-                do_not_trans = not do_not_trans
+                is_not_trans = not is_not_trans
                 continue
 
             # 处理front matter
@@ -66,7 +66,7 @@ class MdTranslater:
                     nodes.append(SolidNode(line))
 
             # 处理代码块
-            elif is_code_block or do_not_trans:
+            elif is_code_block or is_not_trans:
                 nodes.append(TransparentNode(line))
 
             else:
@@ -79,9 +79,9 @@ class MdTranslater:
                 elif line.strip().startswith("#"):  # 标题
                     nodes.append(TitleNode(line))
                     # 一级标题
-                    if line.strip().startswith("# ") and insert_warnings:
+                    if line.strip().startswith("# ") and is_insert_warnings:
                         nodes.append(TransparentNode(f"\n> {config.warnings_mapping[target_lang]}\n"))
-                        insert_warnings = False
+                        is_insert_warnings = False
                 else:  # 普通文字
                     nodes.append(SolidNode(line))
         return nodes
@@ -93,8 +93,8 @@ class MdTranslater:
         nodes = self.__generate_nodes(src_lines, target_lang)
 
         # 待翻译md文本
-        src_md_text = "".join(node.get_trans_buff() for node in nodes if node.get_trans_buff())
-        translated_lines = self.trans.translate_in_batches(src_md_text.splitlines(), src_lang, target_lang).splitlines()
+        trans_buff = "".join(node.get_trans_buff() for node in nodes if node.get_trans_buff())
+        translated_lines = self.__trans.translate_in_batch(trans_buff.splitlines(), src_lang, target_lang).splitlines()
 
         # 将翻译后的内容填充到节点中
         start_pos = 0
@@ -109,34 +109,35 @@ class MdTranslater:
 
         return "".join(node.compose() for node in nodes)
 
-    def __translate_to(self, target_lang):
+    def __translate_to(self, src_file: Path, target_lang: str) -> None:
         """
         执行文件的读取、翻译、写入
         """
-        target_file = self.__src_file.parent / f'{self.__src_file.stem}.{target_lang}.md'
-        logging.info(f"Translating {self.__src_file.name} to {target_lang}")
+        target_file = src_file.parent / f'{src_file.stem}.{target_lang}.md'
+        logging.info(f"Translating {src_file.name} to {target_lang}")
 
         try:
-            src_lines = self.__src_file.read_text(encoding="utf-8").splitlines()
+            src_lines = src_file.read_text(encoding="utf-8").splitlines()
             # 对数据进行预处理
             src_lines = self.__preprocessing(target_lang, src_lines)
-            final_md_text = self.__translate_lines(src_lines, config.src_language, target_lang)
+            translated_text = self.__translate_lines(src_lines, config.src_language, target_lang)
 
-            final_markdown, last_char = "", ""
-            for line in final_md_text.splitlines():
+            markdown_result, last_char = "", ""
+            for line in translated_text.splitlines():
                 if (not line.strip()) or target_lang in config.compact_langs:
-                    final_markdown += line + "\n"
+                    markdown_result += line + "\n"
                     continue
                 parts = Patterns.Expands.split(line)
                 for position, part in enumerate(parts):
                     part = expand_part(part, parts, position, last_char)
                     last_char = part[-1] if part else last_char
-                    final_markdown += part
-                final_markdown += "\n"
-            target_file.write_text(final_markdown.rstrip('\n'), encoding="utf-8")
-            logging.info(f"{self.__src_file.name} -> {target_lang} completed.")
+                    markdown_result += part
+                markdown_result += "\n"
+
+            target_file.write_text(markdown_result.rstrip('\n'), encoding="utf-8")
+            logging.info(f"{src_file.name} -> {target_lang} completed.")
         except Exception as e:
-            logging.error(f"Error occurred when translating {self.__src_file.name} to {target_lang}: {e}")
+            logging.error(f"Error occurred when translating {src_file.name} to {target_lang}: {e}")
             logging.error(e)
 
     def __parallel_translate(self, src_file: Path, target_langs: list) -> None:
@@ -148,18 +149,17 @@ class MdTranslater:
         """
         if len(target_langs) == 0:
             return
-        start = time.time()
-        self.__src_file = src_file
+        start_time = time.time()
         # 使用多线程翻译
-        futures = [self.__executor.submit(self.__translate_to, target_lang) for target_lang in
+        futures = [self.__executor.submit(self.__translate_to, src_file, target_lang) for target_lang in
                    target_langs]
         # 等待所有线程结束
         concurrent.futures.wait(futures)
 
-        cost = round(time.time() - start, 2)
+        time_cost = round(time.time() - start_time, 2)
         logging.info(
-            f"Total time cost: {cost}s, average per lang cost: "
-            f"{round(cost / len(target_langs), 2)}s.\n"
+            f"Total time cost: {time_cost}s, average per lang cost: "
+            f"{round(time_cost / len(target_langs), 2)}s.\n"
         )
 
     def main(self):

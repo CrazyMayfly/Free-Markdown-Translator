@@ -23,7 +23,7 @@ class Patterns:
 PUNCTUATION = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~""" + '；，。、？ 、【】·！￥…—‘“”’《》\n'
 
 
-def is_punctuation(sentence: str, is_first_char=False) -> bool:
+def is_punctuation(sentence: str, is_first_char: bool = False) -> bool:
     """
     判断句子的第一个字符或最后一个字符是否为标点符号
     :param sentence:  待判断的句子
@@ -50,6 +50,14 @@ def get_arguments() -> argparse.Namespace:
 
 
 def expand_part(part: str, parts: list[str], position: int, last_char: str) -> str:
+    """
+    根据part的内容和位置，判断是否需要在part前后添加空格
+    :param part: 待处理的part
+    :param parts: 所有的part
+    :param position: 当前part的位置
+    :param last_char: 之前处理完的最后一个字符
+    :return:
+    """
     if part is None:
         return ""
     if Patterns.Expands.search(part):
@@ -74,14 +82,14 @@ half_full_diff = 0xFEE0
 full_width_symbols = '！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～'
 
 
-def full_to_half_char(ch):
+def full_to_half_char(ch: str) -> str:
     return chr(ord(ch) - half_full_diff)
 
 
 def full_width_symbol_to_half_width(text: str) -> str:
     """
     将全角符号转换为半角符号
-    :param text:  待转换的文本
+    :param text: 待转换的文本
     :return:
     """
     return "".join(full_to_half_char(ch) if ch in full_width_symbols else ch for ch in text)

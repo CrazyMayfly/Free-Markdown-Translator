@@ -3,7 +3,7 @@ from Utils import Patterns
 
 
 class Node:
-    def __init__(self, line):
+    def __init__(self, line: str):
         # 无需翻译的格式相关内容
         self._signs = ''
         # 需要被翻译的内容
