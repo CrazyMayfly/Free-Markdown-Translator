@@ -1,24 +1,10 @@
-import argparse
 import time
 import concurrent.futures
 from pathlib import Path
 from Translator import Translator
 from Nodes import *
 from config import config
-
-
-def get_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Markdown translator, which translates markdown documents to target languages you want."
-    )
-    parser.add_argument(
-        '-f',
-        metavar="file/folder",
-        type=Path,
-        nargs="+",
-        help="the markdown documents or folders to translate.",
-    )
-    return parser.parse_args()
+from Utils import Patterns, is_punctuation, get_arguments
 
 
 class MdTranslater:
@@ -31,17 +17,14 @@ class MdTranslater:
             thread_name_prefix='Translator')
 
     @staticmethod
-    def __preprocessing(target_lang, src_lines):
-        if target_lang != "zh-TW":
-            src_lines_tmp = []
-            for line in src_lines:
-                line = line.replace("。", ". ").replace("，", ",")
-                src_lines_tmp.append(line)
-            src_lines = src_lines_tmp
+    def __preprocessing(target_lang: str, src_lines: list[str]) -> list[str]:
+        if target_lang.lower() != "zh-tw":
+            src_lines = [line.replace("。", ". ").replace("，", ",") for line in src_lines]
         src_lines.append("\n")
         return src_lines
 
-    def __generate_nodes(self, src_lines, target_lang):
+    @staticmethod
+    def __generate_nodes(src_lines, target_lang):
         """
         扫描每行，依次为每行生成节点
         """
@@ -68,7 +51,7 @@ class MdTranslater:
             if line.startswith("__do_not_translate__"):
                 do_not_trans = not do_not_trans
                 continue
-
+            # 处理front matter
             if is_front_matter:
                 if line.startswith(config.front_matter_key_value_keys):
                     nodes.append(KeyValueNode(line))
@@ -78,17 +61,16 @@ class MdTranslater:
                     nodes.append(KeyValueArrayNode(line))
                 else:
                     nodes.append(SolidNode(line))
+            # 处理代码块
             elif is_code_block or do_not_trans:
                 nodes.append(TransparentNode(line))
             else:
-                if len(line.strip()) == 0 or line.startswith(
-                        ("<audio", "<img ")
-                ):  # 空行
+                # 空行或者图片、音频等不需要翻译的内容
+                if len(line.strip()) == 0 or line.startswith(("<audio", "<img ")):
                     nodes.append(TransparentNode(line))
-                elif re.search("!\[.*?\]\(.*?\)", line) is not None:  # 图片
-                    nodes.append(ImageNode(line))
-                elif re.search("\[.*?\]\(.*?\)", line) is not None:
-                    nodes.append(LinkNode(line))
+                # 图片或链接
+                elif Patterns.ImageOrLink.search(line):
+                    nodes.append(ImageOrLinkNode(line))
                 elif line.strip().startswith("#"):  # 标题
                     nodes.append(TitleNode(line))
                     # 一级标题
@@ -99,7 +81,7 @@ class MdTranslater:
                     nodes.append(SolidNode(line))
         return nodes
 
-    def __translate_lines(self, src_lines, src_lang, target_lang):
+    def __translate_lines(self, src_lines: list[str], src_lang: str, target_lang: str) -> str:
         """
         执行数据的拆分翻译组装
         """
@@ -107,12 +89,12 @@ class MdTranslater:
         # 待翻译md文本
         src_md_text = ""
         for node in nodes:
-            trans_buff = node.get_trans_buff()
-            if trans_buff:
+            if trans_buff := node.get_trans_buff():
                 src_md_text += trans_buff
-        src_lines = src_md_text.splitlines()
-        translated_text = self.trans.translate_in_batches(src_lines, src_lang, target_lang)
+
+        translated_text = self.trans.translate_in_batches(src_md_text.splitlines(), src_lang, target_lang)
         translated_lines = translated_text.splitlines()
+
         start_pos = 0
         for node in nodes:
             node_trans_lines = node.trans_lines
@@ -127,10 +109,14 @@ class MdTranslater:
                 )
                 start_pos += node_trans_lines
 
-        final_markdown = ""
-        for node in nodes:
-            final_markdown += node.compose()
-        return final_markdown
+        return "".join(node.compose() for node in nodes)
+
+    def __get_chars_count_in_trans(self, src_file):
+        # with open(self.__src_file, encoding="utf-8") as src_filename_data:
+        #     src_lines = src_filename_data.readlines()
+        # src_lines = self.__preprocessing(target_lang, src_lines)
+        # final_md_text = self.__translate_lines(src_lines, config.src_language, target_lang)
+        pass
 
     def __translate_to(self, target_lang):
         """
@@ -139,34 +125,41 @@ class MdTranslater:
         target_file = self.__src_file.parent / f'{self.__src_file.stem}.{target_lang}.md'
         logging.info(f"Translating {self.__src_file.name} to {target_lang}")
 
-        with open(self.__src_file, encoding="utf-8") as src_filename_data:
-            src_lines = src_filename_data.readlines()
-        # 对数据进行预处理
-        src_lines = self.__preprocessing(target_lang, src_lines)
-        final_md_text = self.__translate_lines(src_lines, config.src_language, target_lang)
-        final_markdown = ""
-        for line in final_md_text.splitlines():
-            if target_lang in config.compact_langs:
-                final_markdown += line + "\n"
-                continue
-            parts = re.split(config.expands_pattern, line)
-            line = ""
-            for position, part in enumerate(parts):
-                if not part or len(part) == 0:
+        try:
+            src_lines = self.__src_file.read_text(encoding="utf-8").splitlines()
+            # 对数据进行预处理
+            src_lines = self.__preprocessing(target_lang, src_lines)
+            final_md_text = self.__translate_lines(src_lines, config.src_language, target_lang)
+
+            final_markdown = ""
+            for line in final_md_text.splitlines():
+                if (not line.strip()) or target_lang in config.compact_langs:
+                    final_markdown += line + "\n"
                     continue
-                for expands_regex in config.expands_regexs:
-                    if not re.match(expands_regex, part):
-                        continue
-                    if position == 0:
-                        part = part + " "
-                    elif position == len(parts) - 1:
-                        part = " " + part
-                    else:
-                        part = " " + part + " "
-                    break
-                line += part
-            final_markdown += line + "\n"
-        target_file.write_text(final_markdown, encoding="utf-8")
+                parts = Patterns.Expands.split(line)
+                for position, part in enumerate(parts):
+                    if part and Patterns.Expands.search(part):
+                        # 首个part，检测之前的结果的最后一个字符是否为标点符号
+                        if position == 0:
+                            if not is_punctuation(final_markdown):
+                                part = " " + part
+                        # 最后一个part，检测前一个part的最后一个字符是否为标点符号
+                        elif position == len(parts) - 1:
+                            if not is_punctuation(parts[position - 1]):
+                                part = " " + part
+                        # 中间的part，检测前一个part的最后一个字符是否为标点符号，检测后一个part的第一个字符是否为标点符号
+                        else:
+                            if not is_punctuation(parts[position - 1]):
+                                part = " " + part
+                            if not is_punctuation(parts[position + 1], is_first_char=True):
+                                part = part + " "
+                    final_markdown += part
+                final_markdown += "\n"
+            target_file.write_text(final_markdown.rstrip('\n'), encoding="utf-8")
+            logging.info(f"{self.__src_file.name} -> {target_lang} completed.")
+        except Exception as e:
+            logging.error(f"Error occurred when translating {self.__src_file.name} to {target_lang}: {e}")
+            logging.error(e)
 
     def __parallel_translate(self, src_file: Path, target_langs: list) -> None:
         """
@@ -183,9 +176,8 @@ class MdTranslater:
         futures = [self.__executor.submit(self.__translate_to, target_lang) for target_lang in
                    target_langs]
         # 等待所有线程结束
-        for future in futures:
-            while not future.done():
-                time.sleep(0.1)
+        concurrent.futures.wait(futures)
+
         cost = round(time.time() - start, 2)
         logging.info(
             f"Total time cost: {cost}s, average per lang cost: "
@@ -231,6 +223,8 @@ class MdTranslater:
                         logging.warning(f"{target_file.name} already exists, Skipped!")
                         continue
                     target_langs.append(lang)
+                # 统计需要翻译的字符量
+                self.__get_chars_count_in_trans(src_file)
                 # 使用多线程翻译
                 self.__parallel_translate(src_file, target_langs)
 

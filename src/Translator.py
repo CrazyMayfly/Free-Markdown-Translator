@@ -61,7 +61,7 @@ class Translator:
         # 确保api接口返回了结果
         while translate is None:
             translate = self.translate(text, src_lang, target_lang)
-        translated_text = translate.split("\n")
+        translated_text = [line.strip(" ") for line in translate.splitlines()]
         # 更新翻译部分的内容
         for position, key in enumerate(translated_parts.keys()):
             translated_parts[key] = translated_text[position]
@@ -72,30 +72,31 @@ class Translator:
         # 拼接回字符串
         for i in range(0, idx):
             translated_text += total_parts[i]
-        splitlines = translated_text.splitlines()[1:-1]
-        translated_text = "\n".join(splitlines) + "\n"
         return translated_text
 
-    def translate_in_batches(self, lines, src_lang, target_lang):
+    def translate_in_batches(self, lines: list[str], src_lang: str, target_lang: str) -> str:
         """
         分批次翻译
         """
-        # 需在头尾添加字符以保证Google Translate Api不会把空行去除
-        tmp = "BEGIN\n"
+        # 统计空行的位置并剔除
+        empty_line_index = [i for i, line in enumerate(lines) if not line.strip()]
+        lines = [line for line in lines if line.strip()]
         translated_text = ""
+        tmp = ""
         for line in lines:
             tmp = tmp + line + "\n"
             # 控制每次发送的数据量
             if len(tmp) > 500:
-                tmp += "END"
                 translated_text += self.__translate_with_skipped_chars(
                     tmp, src_lang, target_lang
                 )
-                tmp = "BEGIN\n"
-
-        if len(tmp) > 0:
-            tmp += "END"
+                tmp = ""
+        if tmp.strip():
             translated_text += self.__translate_with_skipped_chars(
                 tmp, src_lang, target_lang
             )
-        return translated_text
+        lines = translated_text.splitlines()
+        # 将空行插入回去
+        for i in empty_line_index:
+            lines.insert(i, '')
+        return '\n'.join(lines) + '\n'
