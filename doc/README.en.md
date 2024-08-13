@@ -1,31 +1,34 @@
 # Free Markdown Translator
 
+> Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!
+
+
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://GitHub.com/Naereen/ama)
 
-## Introduction
+## Brief introduction
 
-Free Markdown Translator is a free, open source Markdown document translator based on [Translators](https://github.com/UlionTse/translators), which can translate your Markdown documents into any language.
+Free Markdown Translator is a based on [Translators](https://github.com/UlionTse/translators) The free and open source Markdown document translator can translate your Markdown document into any type of language.
 
 Function:
 
-- Translate Markdown documents into any language
-- Supports multiple translation engines including Google, Bing, Deepl, alibaba, sogou, youdao, tencent, baidu, etc.
-- Basically will not destroy the original format of the Markdown document
--Support concurrent translation
-- Supports adding multiple folders and multiple files under one folder, which is very convenient for specific scenarios.
-- Support adding warnings to machine-translated Markdown documents
+- Translate the MarkDown document into any type of language
+- Support contains a variety of translation engines such as Google, Bing, Deepl, Alibaba, SOGOU, YOUDAO, TENCENT, BAIDU
+- Basically, it will not destroy the original format of the Markdown document
+- Support concurrent translation
+- Support multiple folders and multiple files under a folder, which is very convenient for specific scenes
+- Support to add warnings to the Markdown document of machine translation
 
-This program refers to [How to use translate.google.cn free Google translation website to translate the entire Markdown document, V2 modified version (knightli.com)] (https://www.knightli.com/zh-tw/2022/04/24 /free-google-translate-entire-markdown-document-modified version/)
+Reference for this program [How to use translate.google.cn free Google translation website to translate the entire Markdown document, v2 modified version (knightli.com)](https://www.knightli.com/zh-tw/2022/04/24/免費-google-翻譯-整篇-markdown-文檔-修改版/)
 
-## Install and run
+## Installation and operation
 
-Note that if you use a translation engine such as Google Translate that does not provide services in mainland China, you may need to connect to an agent for normal use in mainland China and other regions.
+Note that if you use Google Translation and other translation engines that have not provided services in mainland China, you may need to connect agents in mainland China and other regions to use them normally.
 
-The executable program uses the `config.yaml` file in the same directory as the configuration file. When `config.yaml` is missing, the default configuration is used. For configuration details, refer to the configuration section.
+The executable program uses the same directory under the same directory `config.yaml` The file is used as a configuration file, should `config.yaml` When lacking, use the default configuration, configuration details, refer to the content of the section.
 
-1. Download the distribution version on the right (MarkdownTranslator(vx.y).zip)
-2. After unzipping, double-click to start the program, and then type the path of the Markdown document or the path of the folder to translate.
+1. Download the release version on the right
+2. After decompression, double -click the startup program, and then type the path of the Markdown document or the path of the folder for translation
 3. Or use commands in the console to translate
 
 ```bash
@@ -35,138 +38,138 @@ Markdown translator, which translates markdown documents to target languages
 you want.
 
 options:
- -h, --help show this help message and exit
- -f file/folder [file/folder ...]
- the markdown documents or folders to translate.
+  -h, --help            show this help message and exit
+  -f file/folder [file/folder ...]
+                        the markdown documents or folders to translate.
 ```
 
-Place the files or folders to be translated in the parameter position. You can add multiple folders, and the program will automatically translate each file specified in the configuration file under each folder in sequence.
+Place the files or folders to be translated to the parameter position, you can add multiple folders, and the program will automatically translate each of the files specified in the configuration file in each folder in order.
 
-For example, if the specified target language is English (en) or Japanese (ja), the `readme.md` file will be translated to `readme.en.md`, `readme.ja.md` in the same folder. .
+For example, if the specified target language is English (EN), Japanese (JA), then `readme.md` The file will be translated to the same folder `readme.en.md`,`readme.ja.md` Essence
 
 ## Configuration
 
-Please configure it in `config.yaml` in the same directory as the executable program. For instructions on `yaml` text format, please refer to: [What is YAML? ](https://www.redhat.com/en/ topics/automation/what-is-yaml)
+Please use the same directory as the executable program `config.yaml` Configuration, related `yaml` The instructions of the text format can be referred to:[What is yaml?](https://www.redhat.com/en/topics/automation/what-is-yaml)
 
-1. `insert_warnings`: Controls whether to add machine-translated warnings in front of the document
+1. `insert_warnings`: Control whether to add warnings translated by the machine in front of the document
 
-2. `src_language`: Specifies the source language, auto means automatically recognized by Google
+2. `src_language`: Specify the source language, Auto indicates that Google automatically identifies
 
-3. `warnings_mapping`: The specific content of the machine translation warning in the corresponding language
+3. `warnings_mapping`: The specific content of the corresponding language is translated by the machine translation warning
 
-4. `target_langs`: target language to be translated
+4. `target_langs`: The target language that needs to be translated
 
-5. `src_filenames`: The names of Markdown documents in the file directory that need to be automatically detected and translated
+5. `src_filenames`: The name of the Markdown document that needs to be detected and translated automatically in the file directory
 
-6. `compact_langs`: Compact language, solving the separation problem of non-compact languages ​​such as English
+6. `compact_langs`: Compact language, solving the separation of non -compact language such as English
 
-7. `front_matter_transparent_keys`: The parts of Markdown’s Front Matter that do not need to be translated
+7. `front_matter_transparent_keys`: Markdown's Front Matter does not need to translate parts
 
-8. `front_matter_key_value_keys`: The part of Front Matter that needs to be translated in Key-Value form
+8. `front_matter_key_value_keys`: FRONT MATTER part of the part of translation in the form of key-value
 
-9. `front_matter_key_value_array_keys`: Translated in the form of Key-Value-Arrays in Front Matter
+9. `front_matter_key_value_array_keys`: FRONT MATTER translation in the form of Key-Value-Rrays
 
 Example configuration file:
 
 ```yaml
-# Control whether to add a machine-translated Warning in front of the article
-# Source language, auto means automatic recognition
+# 控制是否在文章前面添加机器翻译的Warning
+# 源语言,auto表示自动识别
 insert_warnings: true
 src_language: auto
 
-# The translation engine used supports google, deepl, bing, alibaba, sogou, youdao, tencent, baidu and other translation engines
+# 使用的翻译引擎,支持google, deepl, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
 
-# Configure the target language and its warning. By default, it will be translated into the following languages ​​in the order of definition.
+# 配置目标语言及其warning,默认按照定义顺序翻译为下面语言
 warnings_mapping:
- zh: "Warning: This article is generated by machine translation, which may result in poor quality or incorrect information, please read with caution!"
- zh-TW: "Warning: This article is generated by machine translation, which may result in poor quality or incorrect information, please read with caution!"
- en: "Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!"
- ja: "Warning: この记事はMechanical translation of 訳されているため、Low quality かったりIncorrect なInformation がcontaining まれるPossibility があります. よくお読みくださ"
- ru: "й информации, пожалуйста, внимательно прочитайте!"
- es: "Advertisement: The best way to deal with the disease. ¡Lea atentamente!"
- fr: "Attention: read article best traduit par machine, read qui peut entraîner une mauvaise qualité ou des information incorrectes, veuillez lire attentivement!"
- de: "Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte soorgfältig lesen!"
- # hindi
- hi: 'बब गुणवत्तयर गलत जरी पढ़ें!'
- # portuguese
- pt: 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
- # korean
- ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있 으므로 주의 깊게 읽으십시오!'
+  zh: "警告:本文由机器翻译生成,可能导致质量不佳或信息有误,请谨慎阅读!"
+  zh-TW: "警告:本文由機器翻譯生成,可能導致質量不佳或信息有誤,請謹慎閱讀!"
+  en: "Warning: This page is translated by MACHINE, which may lead to POOR QUALITY or INCORRECT INFORMATION, please read with CAUTION!"
+  ja: "警告: この記事は機械翻訳されているため、品質が低かったり不正確な情報が含まれる可能性があります。よくお読みください。"
+  ru: "Предупреждение: Эта статья переведена автоматически, что может привести к некачественной или неверной информации, пожалуйста, внимательно прочитайте!"
+  es: "Advertencia: este artículo está traducido por una máquina, lo que puede dar lugar a una mala calidad o información incorrecta. ¡Lea atentamente!"
+  fr: "Attention : cet article est traduit par machine, ce qui peut entraîner une mauvaise qualité ou des informations incorrectes, veuillez lire attentivement !"
+  de: "Achtung: Dieser Artikel wurde maschinell übersetzt, was zu schlechter Qualität oder falschen Informationen führen kann, bitte sorgfältig lesen!"
+  # # 印地语
+  hi: 'चेतावनी: यह लेख मशीन द्वारा अनुवादित है, जिससे खराब गुणवत्ता या गलत जानकारी हो सकती है, कृपया ध्यान से पढ़ें!'
+  # 葡萄牙语
+  pt: 'Aviso: Este artigo é traduzido por máquina, o que pode levar a má qualidade ou informações incorretas, leia com atenção!'
+  # 韩语
+  ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 
-#Specify target language
+# 指定目标语言
 target_langs:
- - en
- - en
- - ja
- - ru
+  - zh
+  - en
+  - ja
+  - ru
 
-# Compact language, solving the separation problem of non-compact languages ​​such as English
+# 紧凑型语言,解决英语等非紧凑型语言的分隔问题
 compact_langs:
- -zh-TW
- -ja
+  - zh-TW
+  - ja
 
-#The name of the document to be translated in the file directory
+# 文件目录下需要翻译的文档的名称
 src_filenames:
- - 'index'
- - 'README'
- - '_index'
+  - 'index'
+  - 'README'
+  - '_index'
 
-# The part of Front Matter in markdown that does not need to be translated
+# markdown中Front Matter不用翻译的部分
 front_matter_transparent_keys:
- - 'date:'
- - 'slug:'
- - 'toc'
- - 'image'
- - 'comments'
- - 'readingTime'
- - 'menu:'
- - 'main:'
- - 'weight:'
- - 'params:'
- - 'icon:'
- - 'links:'
- - ' website:'
- - 'image:'
- - 'layout:'
- - 'outputs:'
- - ' - html'
- - ' - json'
- - 'license:'
- - '#'
- - 'style:'
- - 'background:'
- - 'color:'
+  - 'date:'
+  - 'slug:'
+  - 'toc'
+  - 'image'
+  - 'comments'
+  - 'readingTime'
+  - 'menu:'
+  - '    main:'
+  - '        weight:'
+  - '        params:'
+  - '            icon:'
+  - 'links:'
+  - '    website:'
+  - '    image:'
+  - 'layout:'
+  - 'outputs:'
+  - '    - html'
+  - '    - json'
+  - 'license:'
+  - '#'
+  - 'style:'
+  - '    background:'
+  - '    color:'
 
-# The part of Front Matter that needs to be translated in Key-Value form
+# Front Matter中需要以Key-Value形式翻译的部分
 front_matter_key_value_keys:
- - 'title:'
- - 'description:'
- - 'name:'
- - ' - title:'
- - 'description:'
+  - 'title:'
+  - 'description:'
+  - '        name:'
+  - '  - title:'
+  - '    description:'
 
-# Translate in the form of Key-Value—Arrays in Front Matter
+# Front Matter中以Key-Value—Arrays形式翻译
 front_matter_key_value_array_keys:
- - 'tags:'
- - 'categories:'
- - 'keywords:'
+  - 'tags:'
+  - 'categories:'
+  - 'keywords:'
 ```
 
 ### Target language configuration details
 
-The target language needs to use ISO 639-1 language codes. For details, please refer to [List of ISO 639-1 codes - Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes). Some commonly used languages ​​are given below code
+The target language needs to use ISO 639-1 language code. For details, please refer to [List of ISO 639-1 Codes -Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes), Here are some commonly used language code
 
-| Language name | The language calls itself | Language code |
-| ---------- | ------------------------------- | -------- |
-| Chinese | 中文,中文,华语 | zh |
-| English | English | en |
-| Japanese | 日本语 | ja |
-| Spanish | Español | es |
-| Russian | русский | ru |
-| French | french | fr |
-| German | Deutsch | of |
-| Arabic | Arabic | ar |
-| Hindi | Hindi | hi |
-| Portuguese | Portuguese | pt |
-| Korean | 한국어/韓國語, 朝鮮말/조선말 | the |
+|Language name|This language claims to|Language code|
+| ---------- | ------------------------------ | -------- |
+|Chinese|Chinese, Chinese, Chinese|zh|
+|ENGLISH|ENGLISH|EN|
+|Japanese|Japanese|ja|
+|Spanish|Español|ES|
+|Russian|bleak|ru|
+|French|Fransais|Fr|
+|German|Deutsch|de|
+|Arabic|Bleak|AR|
+|Hindi|Bleak|Hi|
+|Portuguese|Portugugs|PT|
+|Korean|/Korean, North Korea 말/조선말|KO|
