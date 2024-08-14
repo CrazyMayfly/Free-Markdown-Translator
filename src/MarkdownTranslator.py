@@ -1,12 +1,13 @@
 import argparse
 import copy
-import time
 import concurrent.futures
 from pathlib import Path
 from Translator import Translator
 from Nodes import *
 from config import config
-from Utils import Patterns, get_arguments, expand_part, RawData
+from Utils import Patterns, get_arguments, expand_part, RawData, Pbar, shortedPath, get_size
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 
 class MdTranslater:
@@ -78,12 +79,12 @@ class MdTranslater:
                     nodes.append(SolidNode(line))
         return nodes
 
-    def __translate_lines(self, raw_data: RawData, src_lang: str, target_lang: str) -> str:
+    def __translate_lines(self, raw_data: RawData, src_lang: str, target_lang: str, pbar: Pbar) -> str:
         """
         执行数据的拆分翻译组装
         """
         # 待翻译md文本
-        translated_lines = self.__trans.translate_in_batch(raw_data, src_lang, target_lang).splitlines()
+        translated_lines = self.__trans.translate_in_batch(raw_data, src_lang, target_lang, pbar).splitlines()
 
         # 将翻译后的内容填充到节点中
         start_pos = 0
@@ -131,7 +132,10 @@ class MdTranslater:
                 length = 0
         if length:
             chunks.append(self.__handle_chunk('\n'.join(buff) + '\n'))
-        return RawData(nodes, chunks, empty_line_position)
+
+        # 统计需要翻译的字符数
+        chars_count = sum([len("\n".join(parts.values())) for _, parts, _ in chunks])
+        return RawData(nodes, chunks, empty_line_position, chars_count)
 
     @staticmethod
     def __handle_chunk(chunk: str) -> tuple[dict[int, str], dict[int, str], int]:
@@ -157,15 +161,19 @@ class MdTranslater:
         # 组装翻译
         return skipped_parts, need_translate_parts, position
 
-    def __translate_to(self, src_file: Path, target_lang: str, raw_data: RawData) -> None:
+    def __translate_to(self, src_file: Path, target_lang: str, global_pbar: tqdm, raw_data: RawData) -> None:
         """
         执行文件的读取、翻译、写入
         """
         target_file = src_file.parent / f'{src_file.stem}.{target_lang}.md'
-        logging.info(f"Translating {src_file.name} to {target_lang}")
+        logging.info(f"Translating {shortedPath(src_file)} to {target_lang}")
 
+        # 初始化当前线程的进度条
+        local_pbar = tqdm(total=raw_data.chars_count, desc=shortedPath(target_file), unit='chars',
+                          unit_scale=True, leave=False, unit_divisor=1000)
+        pbar = Pbar(global_pbar, local_pbar)
         try:
-            translated_text = self.__translate_lines(raw_data, config.src_language, target_lang)
+            translated_text = self.__translate_lines(raw_data, config.src_language, target_lang, pbar)
 
             markdown_result, last_char = "", ""
             for line in translated_text.splitlines():
@@ -180,10 +188,13 @@ class MdTranslater:
                 markdown_result += "\n"
 
             target_file.write_text(markdown_result.rstrip('\n'), encoding="utf-8")
-            logging.info(f"{src_file.name} -> {target_lang} completed.")
+            logging.info(f"{shortedPath(src_file)} -> {target_lang} completed.")
+            pbar.local_pbar_finished()
         except Exception as e:
-            logging.error(f"Error occurred when translating {src_file.name} to {target_lang}: {e}")
-            logging.error(e)
+            logging.error(f"Error occurred when translating {shortedPath(src_file)} to {target_lang}: {e}")
+            pbar.local_pbar_finished(is_fail=True)
+            # 重新抛出异常，让主线程捕获
+            raise e
 
     @staticmethod
     def __collect_files_to_translate(folders: list[str]) -> list[tuple[Path, list[str]]]:
@@ -202,7 +213,6 @@ class MdTranslater:
                 config.src_filenames = [folder.stem]
                 folder = folder.parent
 
-            logging.info(f"Current folder is : {folder}")
             # 每个文件夹下至少存在一个配置中的文件名
             if not any((Path(folder) / f"{src_filename}.md").exists() for src_filename in config.src_filenames):
                 logging.warning(f"{folder} does not contain any file in src_filenames, Skipped!")
@@ -217,7 +227,7 @@ class MdTranslater:
                 for lang in config.target_langs:
                     target_file = Path(folder) / f'{src_filename}.{lang}.md'
                     if target_file.exists():
-                        logging.warning(f"{target_file.name} already exists, Skipped!")
+                        logging.warning(f"{shortedPath(target_file)} already exists, Skipped!")
                         continue
                     target_langs.append(lang)
                 if len(target_langs):
@@ -228,12 +238,14 @@ class MdTranslater:
         """
         多线程翻译
         """
-        start_time = time.time()
         files_raw_data: dict[Path, RawData] = {}
-        for src_file, _ in files_to_translate:
+        total_chars_count = 0
+        for src_file, target_langs in files_to_translate:
             # 先做预处理
             try:
-                files_raw_data[src_file] = self.__preprocessing(src_file)
+                raw_data = self.__preprocessing(src_file)
+                total_chars_count += raw_data.chars_count * len(target_langs)
+                files_raw_data[src_file] = raw_data
             except Exception as e:
                 logging.error(f"Error occurred when preprocessing {src_file.name}: {e}")
                 continue
@@ -250,20 +262,29 @@ class MdTranslater:
             threads = 30
 
         futures = []
+        # 初始化全局进度条
+        global_pbar = tqdm(total=total_chars_count, desc='Total', unit='chars', unit_scale=True, colour='#01579B',
+                           unit_divisor=1000)
+        # 初始化线程池
         executor = concurrent.futures.ThreadPoolExecutor(thread_name_prefix='Translator', max_workers=threads)
-        for src_file, target_langs in files_to_translate:
-            if (raw_data := files_raw_data.get(src_file)) is None:
-                continue
-            futures.extend(
-                [executor.submit(self.__translate_to, src_file, target_lang, raw_data) for target_lang in target_langs])
+        # 将logging输出重定向到tqdm
+        with logging_redirect_tqdm():
+            for src_file, target_langs in files_to_translate:
+                if (raw_data := files_raw_data.get(src_file)) is None:
+                    continue
+                logging.info(
+                    f"{shortedPath(src_file)} -> chars count: {get_size(raw_data.chars_count, factor=1000, suffix='')}")
+                futures.extend([executor.submit(self.__translate_to, src_file, target_lang, global_pbar, raw_data)
+                                for target_lang in target_langs])
 
-        # 清空不再使用的数据
-        files_raw_data.clear()
-        # 等待所有线程结束
-        concurrent.futures.wait(futures)
+            # 清空不再使用的数据
+            files_raw_data.clear()
+            # 等待所有线程结束
+            concurrent.futures.wait(futures)
 
-        time_cost = round(time.time() - start_time, 2)
-        logging.info(f"Total time cost: {time_cost}s")
+        # 检查有无异常
+        global_pbar.colour = '#F44336' if any(future.exception() is not None for future in futures) else '#98c379'
+        global_pbar.close()
 
     def main(self):
         # 未传入参数则让用户输入

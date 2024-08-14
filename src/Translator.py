@@ -3,17 +3,21 @@ import logging
 import time
 
 import translators as ts
-from Utils import SymbolWidthUtil, RawData
+from Utils import SymbolWidthUtil, RawData, Pbar
 from config import config
 
 MAX_RETRY = 5
+
+
+class TranslateError(Exception):
+    pass
 
 
 class Translator:
     def translate(self, source_text: str, src_lang: str, target_lang: str, retries: int = 0) -> str:
         logging.debug(f"Translating {src_lang} to {target_lang}, length={len(source_text)}, retries={retries}")
         if retries >= MAX_RETRY:
-            return ""
+            raise TranslateError(f"Translate failed after {MAX_RETRY} retries.")
         try:
             result = ts.translate_text(
                 source_text,
@@ -35,8 +39,8 @@ class Translator:
             time.sleep(0.2 * pow(2, retries))
             return self.translate(source_text, src_lang, target_lang, retries)
 
-    def __translate_with_skipped_chars(self, chunk: tuple[dict[int, str], dict[int, str], int],
-                                       src_lang: str, target_lang: str) -> str:
+    def __translate_with_skipped_chars(self, chunk: tuple[dict[int, str], dict[int, str], int], src_lang: str,
+                                       target_lang: str, pbar: Pbar) -> str:
         """
         翻译时忽略在config.py中配置的正则表达式，翻译后保证格式不变
         :param chunk: 本次翻译的文本块
@@ -50,6 +54,7 @@ class Translator:
         while (translated_text := self.translate(text_to_translate, src_lang, target_lang)) is None:
             pass
 
+        pbar.update(len(text_to_translate))
         translated_text = [line.strip(" ") for line in translated_text.splitlines()]
         # 更新翻译部分的内容
         for position, key in enumerate(need_translate_parts.keys()):
@@ -62,11 +67,11 @@ class Translator:
         total_parts = {**skipped_parts, **need_translate_parts}
         return "".join(total_parts[i] for i in range(parts_count))
 
-    def translate_in_batch(self, raw_data: RawData, src_lang: str, target_lang: str) -> str:
+    def translate_in_batch(self, raw_data: RawData, src_lang: str, target_lang: str, pbar: Pbar) -> str:
         """
         分批次翻译
         """
-        translated_text = [self.__translate_with_skipped_chars(chunk, src_lang, target_lang) for chunk in
+        translated_text = [self.__translate_with_skipped_chars(chunk, src_lang, target_lang, pbar) for chunk in
                            # 深拷贝，避免修改原始数据
                            copy.deepcopy(raw_data.chunks)]
         lines = ''.join(translated_text).splitlines()

@@ -6,7 +6,7 @@ from colorlog import ColoredFormatter
 
 # 创建一个自定义的日志处理器来设置日志颜色
 formatter = ColoredFormatter(
-    "%(blue)s%(asctime)s %(log_color)s[%(levelname)-5s]%(reset)s %(blue)s[%(threadName)s] %(log_color)s%(message)s",
+    "%(blue)s%(asctime)s %(log_color)s[%(levelname)-7s]%(reset)s %(blue)s[%(threadName)-12s] %(log_color)s%(message)s",
     datefmt='%Y-%m-%d %H:%M:%S',
     log_colors={
         'DEBUG': 'cyan',

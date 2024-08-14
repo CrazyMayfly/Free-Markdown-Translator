@@ -1,5 +1,6 @@
 import argparse
 import re
+from tqdm import tqdm
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,31 @@ def is_punctuation(sentence: str, is_first_char: bool = False) -> bool:
     if sentence is None or len(sentence.strip()) == 0:
         return True
     return sentence[0 if is_first_char else -1] in PUNCTUATION
+
+
+def shortedPath(path: Path) -> str:
+    """
+    获取文件的最后两级路径
+    :param path: 文件路径
+    :return:
+    """
+    parts = path.parts
+    if len(parts) == 1:
+        return parts[0]
+    return f'{parts[-2]}/{parts[-1]}'
+
+
+def get_size(size, factor=1024, suffix="B"):
+    """
+    Scale bytes to its proper format
+    e.g:
+        1253656 => '1.20MB'
+        1253656678 => '1.17GB'
+    """
+    for data_unit in ["", "K", "M", "G", "T", "P"]:
+        if size < factor:
+            return f"{size:.2f}{data_unit}{suffix}"
+        size /= factor
 
 
 def get_arguments() -> argparse.Namespace:
@@ -85,6 +111,28 @@ class RawData:
     nodes: list
     chunks: list[tuple[dict[int, str], dict[int, str], int]]
     empty_line_position: list[int]
+    chars_count: int
+
+
+class Pbar:
+    """
+    将全局的进度条和局部的进度条绑定在一起，便于同时更新
+    """
+
+    def __init__(self, global_pbar: tqdm, local_pbar: tqdm):
+        self.__global_pbar = global_pbar
+        self.__local_pbar = local_pbar
+
+    def update(self, size: int):
+        self.__local_pbar.update(size)
+        with self.__global_pbar.get_lock():
+            self.__global_pbar.update(size)
+
+    def local_pbar_finished(self, is_fail: bool = False):
+        if is_fail:
+            self.__local_pbar.colour = '#F44336'
+        self.__local_pbar.close()
+        self.__global_pbar.refresh()
 
 
 class SymbolWidthUtil:
