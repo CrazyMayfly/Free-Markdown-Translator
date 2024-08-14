@@ -1,6 +1,8 @@
 import argparse
 import re
+from dataclasses import dataclass
 from pathlib import Path
+
 
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
 skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+',
@@ -76,6 +78,13 @@ def expand_part(part: str, parts: list[str], position: int, last_char: str) -> s
             if not is_punctuation(parts[position + 1], is_first_char=True):
                 part = part + " "
     return part
+
+
+@dataclass
+class RawData:
+    nodes: list
+    chunks: list[tuple[dict[int, str], dict[int, str], int]]
+    empty_line_position: list[int]
 
 
 class SymbolWidthUtil:

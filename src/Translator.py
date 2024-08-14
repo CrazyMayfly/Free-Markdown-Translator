@@ -1,6 +1,7 @@
+import copy
 import logging
 import translators as ts
-from Utils import Patterns, SymbolWidthUtil
+from Utils import SymbolWidthUtil, RawData
 from config import config
 
 MAX_RETRY = 5
@@ -31,33 +32,20 @@ class Translator:
             logging.error(e)
             return self.translate(source_text, src_lang, target_lang, retries)
 
-    def __translate_with_skipped_chars(self, text: str, src_lang: str, target_lang: str) -> str:
+    def __translate_with_skipped_chars(self, chunk: tuple[dict[int, str], dict[int, str], int],
+                                       src_lang: str, target_lang: str) -> str:
         """
         翻译时忽略在config.py中配置的正则表达式，翻译后保证格式不变
-        :param text: 本次翻译的文本
+        :param chunk: 本次翻译的文本块
         :return: 翻译后的文本
         """
-        parts = Patterns.Skipped.split(text)
-        # 跳过的部分
-        skipped_parts = {}
-        # 需要翻译的部分
-        need_translate_parts = {}
-        idx = 0
-        for part in parts:
-            if len(part) == 0:
-                continue
-            if Patterns.Skipped.search(part):
-                skipped_parts.update({idx: part})
-            else:
-                need_translate_parts.update({idx: part})
-            idx += 1
+        # 跳过的部分和需要翻译的部分以及所有部分的数量
+        skipped_parts, need_translate_parts, parts_count = chunk
 
-        # 组装翻译
-        text = "\n".join(need_translate_parts.values())
-        translated_text = self.translate(text, src_lang, target_lang)
+        text_to_translate = "\n".join(need_translate_parts.values())
         # 确保api接口返回了结果
-        while translated_text is None:
-            translated_text = self.translate(text, src_lang, target_lang)
+        while (translated_text := self.translate(text_to_translate, src_lang, target_lang)) is None:
+            pass
 
         translated_text = [line.strip(" ") for line in translated_text.splitlines()]
         # 更新翻译部分的内容
@@ -69,31 +57,17 @@ class Translator:
             skipped_parts = {key: SymbolWidthUtil.full_to_half(value) for key, value in skipped_parts.items()}
 
         total_parts = {**skipped_parts, **need_translate_parts}
-        return "".join(total_parts[i] for i in range(idx))
+        return "".join(total_parts[i] for i in range(parts_count))
 
-    def translate_in_batch(self, lines: list[str], src_lang: str, target_lang: str) -> str:
+    def translate_in_batch(self, raw_data: RawData, src_lang: str, target_lang: str) -> str:
         """
         分批次翻译
         """
-        # 统计空行的位置并剔除
-        empty_line_index = [i for i, line in enumerate(lines) if not line.strip()]
-        lines = [line for line in lines if line.strip()]
-        translated_text = ""
-        tmp = ""
-        for line in lines:
-            tmp = tmp + line + "\n"
-            # 控制每次发送的数据量
-            if len(tmp) > 500:
-                translated_text += self.__translate_with_skipped_chars(
-                    tmp, src_lang, target_lang
-                )
-                tmp = ""
-        if tmp.strip():
-            translated_text += self.__translate_with_skipped_chars(
-                tmp, src_lang, target_lang
-            )
-        lines = translated_text.splitlines()
+        translated_text = [self.__translate_with_skipped_chars(chunk, src_lang, target_lang) for chunk in
+                           # 深拷贝，避免修改原始数据
+                           copy.deepcopy(raw_data.chunks)]
+        lines = ''.join(translated_text).splitlines()
         # 将空行插入回去
-        for i in empty_line_index:
+        for i in raw_data.empty_line_position:
             lines.insert(i, '')
         return '\n'.join(lines) + '\n'
