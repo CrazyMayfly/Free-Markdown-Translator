@@ -1,5 +1,7 @@
 import copy
 import logging
+import time
+
 import translators as ts
 from Utils import SymbolWidthUtil, RawData
 from config import config
@@ -28,8 +30,9 @@ class Translator:
             return result
         except Exception as e:
             retries += 1
-            logging.error(f"Translate error, retry {retries}/{MAX_RETRY}")
-            logging.error(e)
+            logging.error(f"Translate error: {e}, retry {retries}/{MAX_RETRY}")
+            # 重试时等待时间递增
+            time.sleep(0.2 * pow(2, retries))
             return self.translate(source_text, src_lang, target_lang, retries)
 
     def __translate_with_skipped_chars(self, chunk: tuple[dict[int, str], dict[int, str], int],

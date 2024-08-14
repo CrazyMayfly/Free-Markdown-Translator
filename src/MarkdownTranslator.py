@@ -6,7 +6,7 @@ from pathlib import Path
 from Translator import Translator
 from Nodes import *
 from config import config
-from Utils import Patterns, get_arguments, expand_part, SymbolWidthUtil, RawData
+from Utils import Patterns, get_arguments, expand_part, RawData
 
 
 class MdTranslater:
@@ -14,14 +14,6 @@ class MdTranslater:
 
     def __init__(self, args: argparse.Namespace):
         self.__args: argparse.Namespace = args
-        self.__executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(
-            thread_name_prefix='Translator')
-
-    @staticmethod
-    def __convert_symbol_width(src_lines: list[str]) -> list[str]:
-        src_lines = [SymbolWidthUtil.full_to_half(line) for line in src_lines]
-        src_lines.append("\n")
-        return src_lines
 
     @staticmethod
     def __generate_nodes(src_lines: list[str]) -> list[Node]:
@@ -193,40 +185,14 @@ class MdTranslater:
             logging.error(f"Error occurred when translating {src_file.name} to {target_lang}: {e}")
             logging.error(e)
 
-    def __parallel_translate(self, src_file: Path, target_langs: list) -> None:
+    @staticmethod
+    def __collect_files_to_translate(folders: list[str]) -> list[tuple[Path, list[str]]]:
         """
-        多线程翻译
-        :param src_file:  待翻译的源文件
-        :param target_langs:  待翻译的目标语言
+        按传入的文件夹列表收集需要翻译的文档和目标语言
+        :param folders: 文件夹列表
         :return:
         """
-        if len(target_langs) == 0:
-            return
-        start_time = time.time()
-        # 先做预处理
-        try:
-            raw_data = self.__preprocessing(src_file)
-        except Exception as e:
-            logging.error(f"Error occurred when preprocessing {src_file.name}: {e}")
-            return
-
-        # 使用多线程翻译
-        futures = [self.__executor.submit(self.__translate_to, src_file, target_lang, raw_data) for target_lang in
-                   target_langs]
-        # 等待所有线程结束
-        concurrent.futures.wait(futures)
-
-        time_cost = round(time.time() - start_time, 2)
-        logging.info(
-            f"Total time cost: {time_cost}s, average per lang cost: "
-            f"{round(time_cost / len(target_langs), 2)}s.\n"
-        )
-
-    def main(self):
-        folders = self.__args.f
-        if folders is None:
-            folders = [input("Please input the markdown document location: ")]
-        logging.info(f"Current translator engine is: {config.translator}")
+        files_to_translate = []
         for folder in folders:
             folder = Path(folder)
             if not folder.exists():
@@ -247,15 +213,70 @@ class MdTranslater:
                 if not src_file.exists():
                     continue
                 # 将要被翻译至的语言
-                target_langs = []
+                target_langs: list[str] = []
                 for lang in config.target_langs:
                     target_file = Path(folder) / f'{src_filename}.{lang}.md'
                     if target_file.exists():
                         logging.warning(f"{target_file.name} already exists, Skipped!")
                         continue
                     target_langs.append(lang)
-                # 使用多线程翻译
-                self.__parallel_translate(src_file, target_langs)
+                if len(target_langs):
+                    files_to_translate.append((src_file, target_langs))
+        return files_to_translate
+
+    def __parallel_translate(self, files_to_translate: list[tuple[Path, list[str]]]) -> None:
+        """
+        多线程翻译
+        """
+        start_time = time.time()
+        files_raw_data: dict[Path, RawData] = {}
+        for src_file, _ in files_to_translate:
+            # 先做预处理
+            try:
+                files_raw_data[src_file] = self.__preprocessing(src_file)
+            except Exception as e:
+                logging.error(f"Error occurred when preprocessing {src_file.name}: {e}")
+                continue
+
+        if len(files_raw_data) == 0:
+            logging.warning("No files to translate, exit!")
+            return
+
+        # 设置线程数
+        threads = config.threads
+        if threads <= 0:
+            threads = len(config.target_langs)
+        if threads > 30:
+            threads = 30
+
+        futures = []
+        executor = concurrent.futures.ThreadPoolExecutor(thread_name_prefix='Translator', max_workers=threads)
+        for src_file, target_langs in files_to_translate:
+            if (raw_data := files_raw_data.get(src_file)) is None:
+                continue
+            futures.extend(
+                [executor.submit(self.__translate_to, src_file, target_lang, raw_data) for target_lang in target_langs])
+
+        # 清空不再使用的数据
+        files_raw_data.clear()
+        # 等待所有线程结束
+        concurrent.futures.wait(futures)
+
+        time_cost = round(time.time() - start_time, 2)
+        logging.info(f"Total time cost: {time_cost}s")
+
+    def main(self):
+        # 未传入参数则让用户输入
+        if (folders := self.__args.f) is None:
+            folders = [input("Please input the markdown document location: ")]
+
+        # 按传入的参数收集需要翻译的文档和目标语言
+        files_to_translate = self.__collect_files_to_translate(folders)
+        if len(files_to_translate):
+            logging.info(f"Current translator engine is: {config.translator}")
+            self.__parallel_translate(files_to_translate)
+        else:
+            logging.warning("No files to translate, exit!")
 
 
 if __name__ == "__main__":

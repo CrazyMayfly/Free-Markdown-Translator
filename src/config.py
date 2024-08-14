@@ -41,6 +41,7 @@ class Configration:
     target_langs: list
     compact_langs: list
     src_filenames: list
+    threads: int
     front_matter_transparent_keys: tuple
     front_matter_key_value_keys: tuple
     front_matter_key_value_array_keys: tuple
@@ -74,7 +75,7 @@ def get_default_config() -> Configration:
     # Front Matter中以Key-Value—Arrays形式翻译
     front_matter_key_value_array_keys = ('tags:', 'categories:', 'keywords:')
     return Configration(insert_warnings=insert_warnings, src_language=src_language, warnings_mapping=warnings_mapping,
-                        target_langs=list(target_langs), compact_langs=compact_langs,
+                        target_langs=list(target_langs), compact_langs=compact_langs, threads=-1,
                         src_filenames=src_filenames, front_matter_transparent_keys=front_matter_transparent_keys,
                         front_matter_key_value_keys=front_matter_key_value_keys, translator=translator,
                         front_matter_key_value_array_keys=front_matter_key_value_array_keys)
