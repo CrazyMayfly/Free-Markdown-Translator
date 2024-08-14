@@ -3,8 +3,8 @@ import re
 from pathlib import Path
 
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
-skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+', r'^\.$',
-                  r'^,$', '\n']
+skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+',
+                  r'^[\.,\?!;。，？！；、]$', '\n']
 # 非紧凑型语言中需要添加分隔的正则表达式
 expands_regexs = [r'`[^`]+?`', r'".*?"', r'\*\*.*?\*\*', r"\[!\[.*?]\(.*?\)]\(.*?\)|!?\[.*?]\(.*?\)"]
 pattern = "({})".format("|".join(skipped_regexs))
@@ -78,18 +78,37 @@ def expand_part(part: str, parts: list[str], position: int, last_char: str) -> s
     return part
 
 
-half_full_diff = 0xFEE0
-full_width_symbols = '！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～'
+class SymbolWidthUtil:
+    __half_full_diff = 0xFEE0
+    __full_width_symbols = '！＂＃＄％＆＇（）＊＋，－。．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～‘’”“【】《》￥、'
+    __half_width_symbols = '!"#$%&\'()*+,-../:;<=>?@[\]^_`{|}~\'\'""[]<>$,'
+    __full_half_symbol_map = {full: half for full, half in zip(__full_width_symbols, __half_width_symbols)}
+    __half_full_symbol_map = {half: full for full, half in zip(__full_width_symbols, __half_width_symbols)}
 
+    @staticmethod
+    def __full_to_half_symbol(char: str) -> str:
+        return SymbolWidthUtil.__full_half_symbol_map.get(char, char)
 
-def full_to_half_char(ch: str) -> str:
-    return chr(ord(ch) - half_full_diff)
+    @staticmethod
+    def __half_to_full_symbol(char):
+        return chr(ord(char) + SymbolWidthUtil.__half_full_diff)
 
+    @staticmethod
+    def half_to_full(text: str) -> str:
+        """
+        将半角符号转换为全角符号
+        :param text: 待转换的文本
+        :return:
+        """
+        chars = [SymbolWidthUtil.__half_to_full_symbol(char) for char in text]
+        return ''.join(chars)
 
-def full_width_symbol_to_half_width(text: str) -> str:
-    """
-    将全角符号转换为半角符号
-    :param text: 待转换的文本
-    :return:
-    """
-    return "".join(full_to_half_char(ch) if ch in full_width_symbols else ch for ch in text)
+    @staticmethod
+    def full_to_half(text: str) -> str:
+        """
+        将全角符号转换为半角符号
+        :param text: 待转换的文本
+        :return:
+        """
+        chars = [SymbolWidthUtil.__full_to_half_symbol(char) for char in text]
+        return ''.join(chars)

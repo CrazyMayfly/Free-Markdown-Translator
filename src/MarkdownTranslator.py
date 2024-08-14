@@ -5,7 +5,7 @@ from pathlib import Path
 from Translator import Translator
 from Nodes import *
 from config import config
-from Utils import Patterns, get_arguments, expand_part, full_width_symbol_to_half_width
+from Utils import Patterns, get_arguments, expand_part, SymbolWidthUtil
 
 
 class MdTranslater:
@@ -17,9 +17,8 @@ class MdTranslater:
             thread_name_prefix='Translator')
 
     @staticmethod
-    def __preprocessing(target_lang: str, src_lines: list[str]) -> list[str]:
-        if target_lang.lower() != "zh-tw":
-            src_lines = [full_width_symbol_to_half_width(line) for line in src_lines]
+    def __convert_symbol_width(src_lines: list[str]) -> list[str]:
+        src_lines = [SymbolWidthUtil.full_to_half(line) for line in src_lines]
         src_lines.append("\n")
         return src_lines
 
@@ -118,8 +117,6 @@ class MdTranslater:
 
         try:
             src_lines = src_file.read_text(encoding="utf-8").splitlines()
-            # 对数据进行预处理
-            src_lines = self.__preprocessing(target_lang, src_lines)
             translated_text = self.__translate_lines(src_lines, config.src_language, target_lang)
 
             markdown_result, last_char = "", ""

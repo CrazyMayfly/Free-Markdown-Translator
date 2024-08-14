@@ -1,6 +1,6 @@
 import logging
 import translators as ts
-from Utils import Patterns
+from Utils import Patterns, SymbolWidthUtil
 from config import config
 
 MAX_RETRY = 5
@@ -63,6 +63,10 @@ class Translator:
         # 更新翻译部分的内容
         for position, key in enumerate(need_translate_parts.keys()):
             need_translate_parts[key] = translated_text[position]
+
+        if not target_lang.lower().startswith("zh"):
+            # 如果是不是中文，则将skipped_parts中的全角符号变为半角符号
+            skipped_parts = {key: SymbolWidthUtil.full_to_half(value) for key, value in skipped_parts.items()}
 
         total_parts = {**skipped_parts, **need_translate_parts}
         return "".join(total_parts[i] for i in range(idx))
