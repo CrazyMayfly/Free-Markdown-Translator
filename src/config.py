@@ -42,6 +42,7 @@ class Configration:
     compact_langs: list
     src_filenames: list
     threads: int
+    proxy: dict
     front_matter_transparent_keys: tuple
     front_matter_key_value_keys: tuple
     front_matter_key_value_array_keys: tuple
@@ -78,7 +79,7 @@ def get_default_config() -> Configration:
                         target_langs=list(target_langs), compact_langs=compact_langs, threads=-1,
                         src_filenames=src_filenames, front_matter_transparent_keys=front_matter_transparent_keys,
                         front_matter_key_value_keys=front_matter_key_value_keys, translator=translator,
-                        front_matter_key_value_array_keys=front_matter_key_value_array_keys)
+                        front_matter_key_value_array_keys=front_matter_key_value_array_keys,proxy={'enable': False})
 
 
 def get_config(config_path: str) -> Configration:

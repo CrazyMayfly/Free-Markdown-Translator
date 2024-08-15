@@ -169,7 +169,7 @@ class MdTranslater:
         logging.info(f"Translating {shortedPath(src_file)} to {target_lang}")
 
         # 初始化当前线程的进度条
-        local_pbar = tqdm(total=raw_data.chars_count, desc=shortedPath(target_file), unit='chars',
+        local_pbar = tqdm(total=raw_data.chars_count, desc=shortedPath(target_file), unit='Chars',
                           unit_scale=True, leave=False, unit_divisor=1000)
         pbar = Pbar(global_pbar, local_pbar)
         try:
@@ -263,7 +263,7 @@ class MdTranslater:
 
         futures = []
         # 初始化全局进度条
-        global_pbar = tqdm(total=total_chars_count, desc='Total', unit='chars', unit_scale=True, colour='#01579B',
+        global_pbar = tqdm(total=total_chars_count, desc='Total', unit='Chars', unit_scale=True, colour='#01579B',
                            unit_divisor=1000)
         # 初始化线程池
         executor = concurrent.futures.ThreadPoolExecutor(thread_name_prefix='Translator', max_workers=threads)

@@ -1,10 +1,21 @@
 import copy
 import logging
+import sys
 import time
 
-import translators as ts
-from Utils import SymbolWidthUtil, RawData, Pbar
+from Utils import SymbolWidthUtil, RawData, Pbar, set_proxy
 from config import config
+
+# 设置代理后导入翻译模块
+try:
+    set_proxy(config.proxy)
+    import translators as ts
+except Exception as exception:
+    if type(exception).__name__ == "TranslatorError":
+        logging.error(f"Translation engine initialization failed: {exception}")
+    else:
+        logging.error(f"Error occurred when setting proxy: {exception}")
+    sys.exit(1)
 
 MAX_RETRY = 5
 

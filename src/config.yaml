@@ -1,10 +1,39 @@
 # 控制是否在文章前面添加机器翻译的Warning
-# 源语言，auto表示自动识别
 insert_warnings: true
+
+# 源语言，auto表示自动识别
 src_language: auto
+
+# 目标语言
+target_langs:
+  - zh
+  - en
+  - ja
+  - ru
 
 # 使用的翻译引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
+
+# 文件目录下需要翻译的文档的名称
+src_filenames:
+  - 'index'
+  - 'README'
+  - '_index'
+
+# 翻译时使用的最大线程数，不超过30，小于等于0表示使用默认线程数
+threads: -1
+
+# 配置代理
+proxy:
+    # 是否启用代理
+    enable: false
+    # 代理地址
+    address: 127.0.0.1
+    # 代理端口
+    port: 1234
+    # 代理用户名和密码
+    username:
+    password:
 
 # 配置目标语言及其warning，默认按照定义顺序翻译为下面语言
 warnings_mapping:
@@ -23,26 +52,10 @@ warnings_mapping:
   # 韩语
   ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 
-# 翻译时使用的最大线程数，不超过30，小于等于0表示使用默认线程数
-threads: -1
-
-# 指定目标语言
-target_langs:
-  - zh
-  - en
-  - ja
-  - ru
-
 # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
 compact_langs:
   - zh-TW
   - ja
-
-# 文件目录下需要翻译的文档的名称
-src_filenames:
-  - 'index'
-  - 'README'
-  - '_index'
 
 # markdown中Front Matter不用翻译的部分
 front_matter_transparent_keys:

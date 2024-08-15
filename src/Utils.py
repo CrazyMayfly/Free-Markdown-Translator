@@ -1,5 +1,8 @@
 import argparse
+import logging
 import re
+import socks
+import socket
 from tqdm import tqdm
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,6 +95,25 @@ def lower_first_char(sentence: str) -> str:
     if not sentence.split(' ')[0].isupper():
         sentence = sentence[0].lower() + sentence[1:] if len(sentence) > 1 else sentence.lower()
     return sentence
+
+
+def set_proxy(proxy: dict) -> None:
+    enable_proxy = proxy.get("enable", False)
+    if not enable_proxy:
+        return
+    address = proxy.get("address")
+    port = proxy.get("port")
+    if not address:
+        raise ValueError("Proxy address is required.")
+    if not port:
+        raise ValueError("Proxy port is required.")
+    username = str(proxy.get("username")) if proxy.get("username") else None
+    password = str(proxy.get("password")) if proxy.get("password") else None
+    # 设置代理
+    socks.set_default_proxy(socks.SOCKS5, address, port, username=username, password=password)
+    # 将socket替换为经过代理的socket
+    socket.socket = socks.socksocket
+    logging.info(f"Proxy has been set to {address}:{port}")
 
 
 def expand_part(part: str, parts: list[str], position: int, last_char: str) -> str:
