@@ -8,7 +8,7 @@
 
 ## 简介
 
-Free Markdown Translator是一款基于[Translators](https://github.com/UlionTse/translators)的免费、开源的Markdown文档翻译器，能够将你的Markdown文档翻译成任意种语言。
+Free Markdown Translator是一款基于[Translators](https://github.com/UlionTse/translators)的**免费**、**开源**的Markdown文档翻译器，能够将你的Markdown文档翻译成**多种**语言。
 
 功能：
 
@@ -23,13 +23,13 @@ Free Markdown Translator是一款基于[Translators](https://github.com/UlionTse
 
 ## 安装与运行
 
-注意，若使用谷歌翻译等未在中国大陆提供服务的翻译引擎，在中国大陆等地区可能需要连接代理方能正常使用。
+注意，若使用谷歌翻译等未在中国大陆提供服务的翻译引擎，在中国大陆等地区可能需要配置代理方能正常使用。
 
-可执行程序使用同一目录下的`config.yaml`文件作为配置文件，当`config.yaml`缺失时，使用默认配置，配置详情参考配置小节的内容。
+可执行程序使用同一目录下的`config.yaml`文件作为配置文件，当`config.yaml`缺失时，使用默认配置，配置详情参考`配置`小节的内容。
 
-1. 下載右側的發行版（MarkdownTranslator(vx.y).zip）
+1. 下载右侧的发行版（MarkdownTranslator(vx.y).zip）
 2. 解壓後雙擊啟動程序，然後鍵入Markdown文檔的路徑或文件夾的路徑進行翻譯
-3. 或者在控制台中使用命令進行翻譯
+3. 或者在控制台中使用以下命令進行翻譯
 
 ```bash
 usage: MarkdownTranslator.exe [-h] [-f file/folder [file/folder ...]]
@@ -52,33 +52,57 @@ options:
 請在與可執行程序使用同一目錄下的`config.yaml`中進行配置，有關`yaml`文本格式的說明可以參考：[What is YAML?](https://www.redhat.com/en/topics/automation/what-is-yaml)
 
 1. `insert_warnings`: 控制是否在文檔前面添加由機器翻譯的警告
-
 2. `src_language`: 指定源語言，auto表示由谷歌自動識別
-
-3. `warnings_mapping`: 對應語言的由機器翻譯警告的具體內容
-
-4. `target_langs`: 需要翻譯的目標語言
-
+3. `target_langs`: 需要翻譯的目標語言
+4. `translator`: 使用的翻譯引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻譯引擎
 5. `src_filenames`: 文件目錄下需要自動檢測並翻譯的Markdown文檔的名稱
-
-6. `compact_langs`:緊湊型語言，解決英語等非緊湊型語言的分隔問題
-
-7. `front_matter_transparent_keys`: markdown的Front Matter中不用翻译的部分
-
-8. `front_matter_key_value_keys`: Front Matter中需要以Key-Value形式翻译的部分
-
-9. `front_matter_key_value_array_keys`: Front Matter中以Key-Value-Arrays形式翻译
+6. `threads`: 翻譯時使用的最大線程數
+7. `proxy`: 配置代理
+8. `warnings_mapping`: 对应语言的由机器翻译警告的具体内容
+9. `compact_langs`:紧凑型语言，解决英语等非紧凑型语言的分隔问题
+10.`front_matter_transparent_keys`: markdown的Front Matter中不用翻译的部分
+11.`front_matter_key_value_keys`: Front Matter中需要以Key-Value形式翻译的部分
+12.`front_matter_key_value_array_keys`: Front Matter中以Key-Value-Arrays形式翻译
 
 示例配置文件：
 
 ```yaml
 # 控制是否在文章前面添加机器翻译的Warning
-# 源语言，auto表示自动识别
 insert_warnings: true
+
+# 源语言，auto表示自动识别
 src_language: auto
+
+# 目标语言
+target_langs:
+  - zh
+  - en
+  - ja
+  - ru
 
 # 使用的翻译引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
 translator: google
+
+# 文件目录下需要翻译的文档的名称
+src_filenames:
+  - 'index'
+  - 'README'
+  - '_index'
+
+# 翻译时使用的最大线程数，不超过30，小于等于0表示使用默认线程数
+threads: -1
+
+# 配置代理
+proxy:
+    # 是否启用代理
+    enable: false
+    # 代理地址
+    address: 127.0.0.1
+    # 代理端口
+    port: 1234
+    # 代理用户名和密码
+    username:
+    password:
 
 # 配置目标语言及其warning，默认按照定义顺序翻译为下面语言
 warnings_mapping:
@@ -97,23 +121,10 @@ warnings_mapping:
   # 韩语
   ko: '경고: 이 기사는 기계 번역으로 생성되어 품질이 좋지 않거나 잘못된 정보로 이어질 수 있으므로 주의 깊게 읽으십시오!'
 
-# 指定目标语言
-target_langs:
-  - zh
-  - en
-  - ja
-  - ru
-
 # 紧凑型语言，解决英语等非紧凑型语言的分隔问题
 compact_langs:
   - zh-TW
   - ja
-
-# 文件目录下需要翻译的文档的名称
-src_filenames:
-  - 'index'
-  - 'README'
-  - '_index'
 
 # markdown中Front Matter不用翻译的部分
 front_matter_transparent_keys:
@@ -163,13 +174,13 @@ front_matter_key_value_array_keys:
 |语言名称|该语言自称|语言代码|
 | ---------- | ------------------------------ | -------- |
 |Chinese|漢語、汉语、华语|zh|
-|English|English|en|
-|Japanese|日本語|ja|
-|Spanish|Español|es|
-|Russian|русский|ru|
-|French|français|fr|
-|German|Deutsch|de|
-|Arabic|العربية|ar|
-|Hindi|हिन्दी|hi|
-|Portuguese|Português|pt|
-|Korean|한국어／韓國語, 朝鮮말／조선말|ko|
+|英語|英語|經過|
+|日本人|日本語|已經|
+|西班牙語|西班牙語|是|
+|俄語|n。|ru|
+|法語|法語|fr|
+|兄弟|德意志|的|
+|阿拉伯|ال令|去|
+|印地語|查看更多|那裡|
+|葡萄牙語|葡萄牙語|pt|
+|韓國人|韓語 /韓語，約瑟|ko|
