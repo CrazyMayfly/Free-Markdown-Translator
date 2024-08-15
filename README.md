@@ -3,6 +3,8 @@
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://github.com/CrazyMayfly/Free-Markdown-Translator/issues)
 
+[English](doc/README.en.md) | [繁體中文](doc/README.zh-tw.md) | [Deutsch](doc/README.de.md) | [日本語](doc/README.ja.md) | [русский](doc/README.ru.md) | [한국어](doc/README.ko.md) | [Português](doc/README.pt.md) | [Español](doc/README.es.md) | [Français](doc/README.fr.md) | [हिन्दी](doc/README.hi.md)
+
 ## 简介
 
 Free Markdown Translator是一款基于 [Translators](https://github.com/UlionTse/translators) 的**免费**、**开源**的Markdown文档翻译器，能够将你的Markdown文档翻译成**多种**语言。
