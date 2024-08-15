@@ -4,7 +4,6 @@ from tqdm import tqdm
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
 skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+',
                   r'^[\.,\?!;。，？！；、]$', '\n']
@@ -24,18 +23,21 @@ class Patterns:
 
 
 PUNCTUATION = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~""" + '；，。、？ 、【】·！￥…—‘“”’《》\n'
+STOP_PUNCTUATION = ".!?。！？：:；;\n"
 
 
-def is_punctuation(sentence: str, is_first_char: bool = False) -> bool:
+def is_not_punctuation(sentence: str, is_first_char: bool = False, is_stop: bool = False) -> bool:
     """
-    判断句子的第一个字符或最后一个字符是否为标点符号
+    判断句子的第一个字符或最后一个字符是否为标点符号或停止符号
     :param sentence:  待判断的句子
     :param is_first_char:  是否判断第一个字符
+    :param is_stop: 判断是否为停止符号
     :return:
     """
     if sentence is None or len(sentence.strip()) == 0:
         return True
-    return sentence[0 if is_first_char else -1] in PUNCTUATION
+    punctuation_set = STOP_PUNCTUATION if is_stop else PUNCTUATION
+    return sentence[0 if is_first_char else -1] not in punctuation_set
 
 
 def shortedPath(path: Path) -> str:
@@ -77,6 +79,21 @@ def get_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def lower_first_char(sentence: str) -> str:
+    """
+    将句子的首字母转为小写
+    :param sentence: 待处理的句子
+    :return:
+    """
+    if not sentence:
+        return ""
+
+    # 若句子的首个单词不是全部大写，则将句子的首字母转为小写
+    if not sentence.split(' ')[0].isupper():
+        sentence = sentence[0].lower() + sentence[1:] if len(sentence) > 1 else sentence.lower()
+    return sentence
+
+
 def expand_part(part: str, parts: list[str], position: int, last_char: str) -> str:
     """
     根据part的内容和位置，判断是否需要在part前后添加空格
@@ -88,20 +105,28 @@ def expand_part(part: str, parts: list[str], position: int, last_char: str) -> s
     """
     if part is None:
         return ""
+
+    # 若part位于句首且之前的最后一个字符是逗号，则将part的首字母转为小写
+    if position == 0 and last_char in ',，':
+        part = lower_first_char(part)
+    # 若part不位于句首且前一个part的最后一个字符不是停止符号，则将part的首字母转为小写
+    if position != 0 and is_not_punctuation(parts[position - 1], is_stop=True):
+        part = lower_first_char(part)
+
     if Patterns.Expands.search(part):
         # 首个part，检测之前的结果的最后一个字符是否为标点符号
         if position == 0:
-            if not is_punctuation(last_char):
+            if is_not_punctuation(last_char):
                 part = " " + part
         # 最后一个part，检测前一个part的最后一个字符是否为标点符号
         elif position == len(parts) - 1:
-            if not is_punctuation(parts[position - 1]):
+            if is_not_punctuation(parts[position - 1]):
                 part = " " + part
         # 中间的part，检测前一个part的最后一个字符是否为标点符号，检测后一个part的第一个字符是否为标点符号
         else:
-            if not is_punctuation(parts[position - 1]):
+            if is_not_punctuation(parts[position - 1]):
                 part = " " + part
-            if not is_punctuation(parts[position + 1], is_first_char=True):
+            if is_not_punctuation(parts[position + 1], is_first_char=True):
                 part = part + " "
     return part
 

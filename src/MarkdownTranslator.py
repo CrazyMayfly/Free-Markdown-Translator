@@ -175,19 +175,19 @@ class MdTranslater:
         try:
             translated_text = self.__translate_lines(raw_data, config.src_language, target_lang, pbar)
 
-            markdown_result, last_char = "", ""
-            for line in translated_text.splitlines():
-                if (not line.strip()) or target_lang in config.compact_langs:
-                    markdown_result += line + "\n"
+            markdown_result, last_char = [], ""
+            for translated_line in translated_text.splitlines():
+                # 空行或者紧凑型语言则直接添加到结果中
+                if (not translated_line.strip()) or target_lang in config.compact_langs:
+                    markdown_result.append(translated_line)
                     continue
-                parts = Patterns.Expands.split(line)
-                for position, part in enumerate(parts):
-                    part = expand_part(part, parts, position, last_char)
-                    last_char = part[-1] if part else last_char
-                    markdown_result += part
-                markdown_result += "\n"
+                # 非紧凑型语言则需要在特定的位置添加空格
+                parts = Patterns.Expands.split(translated_line)
+                line = "".join(expand_part(part, parts, position, last_char) for position, part in enumerate(parts))
+                last_char = parts[-1][-1] if parts[-1] else last_char
+                markdown_result.append(line)
 
-            target_file.write_text(markdown_result.rstrip('\n'), encoding="utf-8")
+            target_file.write_text('\n'.join(markdown_result), encoding="utf-8")
             logging.info(f"{shortedPath(src_file)} -> {target_lang} completed.")
             pbar.local_pbar_finished()
         except Exception as e:
