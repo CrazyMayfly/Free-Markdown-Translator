@@ -49,11 +49,11 @@ class MdTranslater:
 
             # 处理front matter
             if is_front_matter:
-                if line.startswith(config.front_matter_key_value_keys):
+                if line.startswith(tuple(config.front_matter_key_value_keys)):
                     nodes.append(KeyValueNode(line))
-                elif line.startswith(config.front_matter_transparent_keys):
+                elif line.startswith(tuple(config.front_matter_transparent_keys)):
                     nodes.append(TransparentNode(line))
-                elif line.startswith(config.front_matter_key_value_array_keys):
+                elif line.startswith(tuple(config.front_matter_key_value_array_keys)):
                     nodes.append(KeyValueArrayNode(line))
                 else:
                     nodes.append(SolidNode(line))
