@@ -184,3 +184,6 @@ front_matter_key_value_array_keys:
 | Portuguese | Português                      | pt       |
 | Korean     | 한국어／韓國語, 朝鮮말／조선말 | ko       |
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=CrazyMayfly/Free-Markdown-Translator&type=Date)](https://star-history.com/#CrazyMayfly/Free-Markdown-Translator&Date)
