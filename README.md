@@ -183,4 +183,10 @@ front_matter_key_value_array_keys:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=CrazyMayfly/Free-Markdown-Translator&type=Date)](https://star-history.com/#CrazyMayfly/Free-Markdown-Translator&Date)
+<a href="https://star-history.com/#CrazyMayfly/Free-Markdown-Translator&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=CrazyMayfly/Free-Markdown-Translator&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=CrazyMayfly/Free-Markdown-Translator&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CrazyMayfly/Free-Markdown-Translator&type=Date" />
+ </picture>
+</a>
