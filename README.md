@@ -1,7 +1,4 @@
-# Free Markdown Translator
-
-[![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
-[![Ask Me Anything !](https://img.shields.io/badge/Ask%20me-anything-1abc9c.svg)](https://github.com/CrazyMayfly/Free-Markdown-Translator/issues)
+![Free-Markdown-Translator](https://socialify.git.ci/CrazyMayfly/Free-Markdown-Translator/image?custom_description=Free+Markdown+Translator%E6%98%AF%E4%B8%80%E6%AC%BE%E5%9F%BA%E4%BA%8E+Translators+%E7%9A%84%E5%85%8D%E8%B4%B9%E3%80%81%E5%BC%80%E6%BA%90%E7%9A%84Markdown%E6%96%87%E6%A1%A3%E7%BF%BB%E8%AF%91%E5%99%A8%EF%BC%8C%E8%83%BD%E5%A4%9F%E5%B0%86%E4%BD%A0%E7%9A%84Markdown%E6%96%87%E6%A1%A3%E7%BF%BB%E8%AF%91%E6%88%90%E4%BB%BB%E6%84%8F%E7%A7%8D%E8%AF%AD%E8%A8%80%E3%80%82&description=1&font=Bitter&forks=1&language=1&name=1&owner=1&pattern=Solid&stargazers=1&theme=Auto)
 
 [English](doc/README.en.md) | [繁體中文](doc/README.zh-tw.md) | [Deutsch](doc/README.de.md) | [日本語](doc/README.ja.md) | [русский](doc/README.ru.md) | [한국어](doc/README.ko.md) | [Português](doc/README.pt.md) | [Español](doc/README.es.md) | [Français](doc/README.fr.md) | [हिन्दी](doc/README.hi.md)
 
