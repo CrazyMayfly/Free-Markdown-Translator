@@ -54,7 +54,15 @@ class SolidNode(Node):
 class KeyValueNode(Node):
     def __init__(self, line):
         super().__init__(line)
-        idx = self._line.index(':')
+        try:
+            idx = self._line.index(':')
+        except ValueError as e:
+            # 打印出触发 substring not found 的原始内容，方便排查
+            logging.error(
+                "KeyValueNode: failed to find ':' in line (substring not found). "
+                f"Raw line = {repr(self._line)}"
+            )
+            raise e
         self._signs = self._line[0: idx + 1]
         self.value = self._line[idx + 1:].strip()
 
@@ -66,7 +74,15 @@ class KeyValueNode(Node):
 class TitleNode(Node):
     def __init__(self, line):
         super().__init__(line)
-        idx = self._line.index(' ')
+        try:
+            idx = self._line.index(' ')
+        except ValueError as e:
+            # 打印出触发 substring not found 的原始内容，方便排查
+            logging.error(
+                "TitleNode: failed to find space in title line (substring not found). "
+                f"Raw line = {repr(self._line)}"
+            )
+            raise e
         self._signs = self._line[0: idx]
         self.value = self._line[idx + 1:]
 
@@ -135,7 +151,15 @@ class ImageOrLinkNode(Node):
 class KeyValueArrayNode(Node):
     def __init__(self, line):
         super().__init__(line)
-        idx = self._line.index(':')
+        try:
+            idx = self._line.index(':')
+        except ValueError as e:
+            # 打印出触发 substring not found 的原始内容，方便排查
+            logging.error(
+                "KeyValueArrayNode: failed to find ':' in line (substring not found). "
+                f"Raw line = {repr(self._line)}"
+            )
+            raise e
         key = self._line[0: idx + 1]
         self._signs = key
         value = self._line[idx + 1:].strip()

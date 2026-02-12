@@ -1,5 +1,11 @@
+# 基础依赖
 translators~=5.9.0
 PyYAML~=6.0.2
 colorlog~=6.8.2
 tqdm~=4.66.2
 PySocks~=1.7.1
+
+# LLM 翻译器依赖（可选，使用 LLM 翻译时需要安装）
+# openai>=1.0.0
+# httpx>=0.24.0
+# python-dotenv>=1.0.0

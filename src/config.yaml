@@ -2,17 +2,24 @@
 insert_warnings: true
 
 # 源语言，auto表示自动识别
-src_language: auto
+src_language: en
 
 # 目标语言
 target_langs:
   - zh
-  - en
-  - ja
-  - ru
 
 # 使用的翻译引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
-translator: google
+# 设置为 'llm' 使用大语言模型进行翻译
+# 大模型配置优先从本文件下方的 llm_config 读取，未配置时从项目根目录 .env 读取
+translator: llm
+# ---------- 可选：LLM 翻译器配置（仅当 translator: llm 时生效）----------
+# 配置后优先使用此处，不配置则从项目根目录 .env 读取 LLM_MODEL_URL / LLM_MODEL_NAME / LLM_MODEL_API_KEY
+# llm_config:
+#   api_base: 'https://api.openai.com/v1'   # 或兼容 OpenAI 的 API 地址
+#   model: gpt-4
+#   api_key: 'sk-xxx'
+#   temperature: 0.3
+#   max_tokens: 2000
 
 # 文件目录下需要翻译的文档的名称
 src_filenames:
@@ -21,16 +28,23 @@ src_filenames:
   - '_index'
 
 # 翻译时使用的最大线程数，不超过30，小于等于0表示使用默认线程数
-threads: -1
+threads: 4
+
+# --- chunking / LLM 上下文窗口 ---
+# 每个 chunk 的目标字符数（按行 len(line) 累加的近似值）；值越大，上下文越足但单次请求越长
+chunk_size_chars: 500
+# 仅在 translator=llm 时生效：为每个 chunk 额外提供上下文行数（只用于理解，不回填翻译）
+llm_context_before_lines: 0
+llm_context_after_lines: 0
 
 # 配置代理
 proxy:
     # 是否启用代理
     enable: false
     # 代理地址
-    address: 127.0.0.1
+    address: 
     # 代理端口
-    port: 1234
+    port: 
     # 代理用户名和密码
     username:
     password:
