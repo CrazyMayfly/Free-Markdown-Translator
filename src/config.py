@@ -1,8 +1,21 @@
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 import logging
 from colorlog import ColoredFormatter
+
+# 屏蔽第三方库的噪音日志（例如 OpenAI SDK / httpx 的请求日志）
+class _SuppressHttpRequestLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        # 典型输出：HTTP Request: POST https://... "HTTP/1.1 200 OK"
+        if isinstance(msg, str) and msg.startswith("HTTP Request:"):
+            return False
+        return True
 
 # 创建一个自定义的日志处理器来设置日志颜色
 formatter = ColoredFormatter(
@@ -19,17 +32,23 @@ formatter = ColoredFormatter(
 # 创建控制台处理器并设置格式
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
+console_handler.addFilter(_SuppressHttpRequestLogFilter())
 logger = logging.getLogger()
 # 设置日志级别
 logger.setLevel(logging.INFO)
 # 将处理器添加到日志记录器
 logger.addHandler(console_handler)
 
+# 降低第三方库 HTTP 请求日志的输出（避免刷屏）
+# 这些 logger 常见于 openai-python(>=1.x) 以及其底层 httpx/httpcore
+for _name in ("openai", "openai._base_client", "httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 # 支持的翻译引擎
 SUPPORTED_TRANSLATORS = {"google", "baidu", "bing", "sogou", "youdao", 'niutrans', 'mymemory', 'alibaba', 'tencent',
                          'modernmt', 'volcengine', 'iciba', 'iflytek', 'lingvanex', 'yandex', 'itranslate', 'systran',
                          'argos', 'apertium', 'reverso', 'cloudtranslation', 'qqtransmart', 'translateCom',
-                         'tilde', 'qqfanyi', 'translateme'}
+                         'tilde', 'qqfanyi', 'translateme', 'llm'}
 
 
 @dataclass
@@ -46,6 +65,14 @@ class Configration:
     front_matter_transparent_keys: tuple
     front_matter_key_value_keys: tuple
     front_matter_key_value_array_keys: tuple
+    # --- chunking / LLM context window ---
+    # 单个 chunk 的目标字符数（按 len(line) 累加的近似值）
+    chunk_size_chars: int = 500
+    # 仅在 translator=llm 时生效：给每个 chunk 额外提供上下文行数（不回填翻译）
+    llm_context_before_lines: int = 5
+    llm_context_after_lines: int = 5
+    # 可选：LLM 翻译器配置（api_base, model, api_key, temperature, max_tokens）；不配置则从 .env 读取
+    llm_config: Optional[dict] = None
 
 
 def get_default_config() -> Configration:
@@ -79,7 +106,8 @@ def get_default_config() -> Configration:
                         target_langs=list(target_langs), compact_langs=compact_langs, threads=-1,
                         src_filenames=src_filenames, front_matter_transparent_keys=front_matter_transparent_keys,
                         front_matter_key_value_keys=front_matter_key_value_keys, translator=translator,
-                        front_matter_key_value_array_keys=front_matter_key_value_array_keys,proxy={'enable': False})
+                        front_matter_key_value_array_keys=front_matter_key_value_array_keys, proxy={'enable': False},
+                        chunk_size_chars=500, llm_context_before_lines=0, llm_context_after_lines=0, llm_config=None)
 
 
 def get_config(config_path: str) -> Configration:
@@ -98,6 +126,11 @@ def get_config(config_path: str) -> Configration:
     try:
         with config_file.open(mode='r', encoding='utf-8') as file:
             data = yaml.safe_load(file)
+        # 兼容旧配置：为新增字段设置默认值（避免缺字段直接 TypeError）
+        data.setdefault("chunk_size_chars", 500)
+        data.setdefault("llm_context_before_lines", 0)
+        data.setdefault("llm_context_after_lines", 0)
+        data.setdefault("llm_config", None)
         translator: str = data.get("translator")
         if translator is None:
             logging.warning(f"Translator not configured, use google translator.")
@@ -111,4 +144,6 @@ def get_config(config_path: str) -> Configration:
         return get_default_config()
 
 
-config = get_config("config.yaml")
+# 使用与 config.py 同一目录下的 config.yaml 文件
+config_file_path = Path(__file__).parent / "config.yaml"
+config = get_config(str(config_file_path))

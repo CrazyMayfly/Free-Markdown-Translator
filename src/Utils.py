@@ -6,10 +6,30 @@ import socket
 from tqdm import tqdm
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeAlias
 
-# 指定要跳过翻译的字符的正则表达式，分别为加粗符号、在``中的非中文字符，`，用于过滤表格的符号，换行符
-skipped_regexs = [r"\*\*。?", r'#+', r'`[^\u4E00-\u9FFF]*?`', r'`', r'"[^\u4E00-\u9FFF]*?"', r'\|', r'^ *-+',
-                  r'^[\.,\?!;。，？！；、]$', '\n']
+# chunk 类型说明：
+# - 传统翻译器： (skipped_parts, need_translate_parts, parts_count)
+# - LLM（启用上下文窗口时）：(context_before, skipped_parts, need_translate_parts, parts_count, context_after)
+SkippedParts: TypeAlias = dict[int, str]
+NeedTranslateParts: TypeAlias = dict[int, str]
+ChunkBasic: TypeAlias = tuple[SkippedParts, NeedTranslateParts, int]
+ChunkWithContext: TypeAlias = tuple[str, SkippedParts, NeedTranslateParts, int, str]
+Chunk: TypeAlias = ChunkBasic | ChunkWithContext
+
+# 指定要跳过翻译的“格式/符号”正则表达式（用于把 Markdown 标记从正文中切分出来并原样保留）。
+# 注意：不要跳过普通的双引号内容（例如 `"text"`），否则在源文本存在异常引号（如 PDF/OCR 产物）时，
+# 会把大段正文误判为“不可翻译”并直接原样输出，导致出现“前后内容没翻译”的现象。
+skipped_regexs = [
+    r"\*\*。?",
+    r'#+',
+    r'`[^\u4E00-\u9FFF]*?`',
+    r'`',
+    r'\|',
+    r'^ *-+',
+    r'^[\.,\?!;。，？！；、]$',
+    '\n',
+]
 # 非紧凑型语言中需要添加分隔的正则表达式
 expands_regexs = [r'`[^`]+?`', r'".*?"', r'\*\*.*?\*\*', r"\[!\[.*?]\(.*?\)]\(.*?\)|!?\[.*?]\(.*?\)"]
 pattern = "({})".format("|".join(skipped_regexs))
@@ -55,6 +75,25 @@ def shortedPath(path: Path) -> str:
     return f'{parts[-2]}/{parts[-1]}'
 
 
+def ensure_unique_output_path(path: Path) -> Path:
+    """
+    如果目标输出文件已存在，则返回一个带数字后缀的新路径，按 1,2,3... 递增直到不冲突。
+
+    示例：
+    - a.md 已存在 -> a.1.md
+    - a.1.md 也存在 -> a.2.md
+    """
+    if not path.exists():
+        return path
+
+    i = 1
+    while True:
+        candidate = path.with_name(f"{path.stem}.{i}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
 def get_size(size, factor=1024, suffix="B"):
     """
     Scale bytes to its proper format
@@ -70,14 +109,31 @@ def get_size(size, factor=1024, suffix="B"):
 
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Markdown translator, which translates markdown documents to target languages you want."
+        description=(
+            "Free Markdown Translator - translate Markdown documents into multiple languages.\n\n"
+            "默认行为：当目标输出文件已存在时跳过该翻译任务。\n"
+            "可以通过 --continue / --rewrite 控制已存在输出文件的处理方式。\n"
+            "支持多种翻译引擎：传统引擎（google/bing/baidu...）和 LLM 引擎（translator: llm，需在 .env 中配置 LLM_MODEL_URL/LLM_MODEL_NAME/LLM_MODEL_API_KEY）。"
+        )
     )
     parser.add_argument(
         '-f',
-        metavar="file/folder",
+        metavar="FILE_OR_FOLDER",
         type=Path,
         nargs="+",
-        help="the markdown documents or folders to translate.",
+        help="要翻译的 Markdown 文档或文件夹路径；可同时指定多个。",
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        '--continue',
+        dest="continue_mode",
+        action="store_true",
+        help="若目标输出文件已存在，则为该文件生成带数字后缀的新文件（例如 a.md -> a.1.md）。",
+    )
+    mode_group.add_argument(
+        '--rewrite',
+        action="store_true",
+        help="若目标输出文件已存在，则直接覆盖该文件的内容。",
     )
     return parser.parse_args()
 
@@ -156,7 +212,7 @@ def expand_part(part: str, parts: list[str], position: int, last_char: str) -> s
 @dataclass
 class RawData:
     nodes: list
-    chunks: list[tuple[dict[int, str], dict[int, str], int]]
+    chunks: list[Chunk]
     empty_line_position: list[int]
     chars_count: int
 
@@ -185,7 +241,8 @@ class Pbar:
 class SymbolWidthUtil:
     __half_full_diff = 0xFEE0
     __full_width_symbols = '！＂＃＄％＆＇（）＊＋，－。．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～‘’”“【】《》￥、'
-    __half_width_symbols = '!"#$%&\'()*+,-../:;<=>?@[\]^_`{|}~\'\'""[]<>$,'
+    # 注意：字符串里包含反斜杠，需要写成 `\\`，否则会触发 Python 的无效转义告警
+    __half_width_symbols = '!"#$%&\'()*+,-../:;<=>?@[\\]^_`{|}~\'\'""[]<>$,'
     __full_half_symbol_map = {full: half for full, half in zip(__full_width_symbols, __half_width_symbols)}
     __half_full_symbol_map = {half: full for full, half in zip(__full_width_symbols, __half_width_symbols)}
 

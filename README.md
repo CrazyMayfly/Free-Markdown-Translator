@@ -10,6 +10,7 @@ Free Markdown Translator是一款基于 [Translators](https://github.com/UlionTs
 
 - 将Markdown文档翻译成任意种语言
 - 支持包含Google, Bing, alibaba, sogou, youdao, tencent, baidu等多种翻译引擎
+- 支持使用**大语言模型（LLM）**进行高质量翻译（如 OpenAI、DeepSeek、通义千问、智谱等，需自行提供 API Key）
 - 基本不会破坏Markdown文档原有的格式
 - 支持并发翻译
 - 支持添加多个文件夹、一个文件夹下的多个文件，对于特定场景十分便捷
@@ -28,20 +29,73 @@ Free Markdown Translator是一款基于 [Translators](https://github.com/UlionTs
 3. 或者在控制台中使用以下命令进行翻译
 
 ```bash
-usage: MarkdownTranslator.exe [-h] [-f file/folder [file/folder ...]]
+usage: MarkdownTranslator.py [-h] [-f FILE_OR_FOLDER [FILE_OR_FOLDER ...]]
+                             [--continue | --rewrite]
 
-Markdown translator, which translates markdown documents to target languages
-you want.
+Free Markdown Translator - translate Markdown documents into multiple languages.
+
+默认行为：当目标输出文件已存在时跳过该翻译任务。
+可以通过 --continue / --rewrite 控制已存在输出文件的处理方式。
 
 options:
   -h, --help            show this help message and exit
-  -f file/folder [file/folder ...]
-                        the markdown documents or folders to translate.
+  -f FILE_OR_FOLDER [FILE_OR_FOLDER ...]
+                        要翻译的 Markdown 文档或文件夹路径；可同时指定多个。
+  --continue            若目标输出文件已存在，则为该文件生成带数字后缀的新文件（例如
+                        a.md -> a.1.md）。
+  --rewrite             若目标输出文件已存在，则直接覆盖该文件的内容。
 ```
 
 参数位置放置待翻译的文件或文件夹，可以添加多个文件夹，程序会自动按顺序翻译每个文件夹下的每个在配置文件中指定的文件。
 
 例如，若指定的目标语言为英语(en)、日本语(ja)，则`readme.md`文件会被翻译到同文件夹下的`readme.en.md`,`readme.ja.md`。
+
+使用 LLM 翻译时，输出文件名会带上引擎和模型信息，例如：
+
+- 传统引擎：`README.en.google.md`
+- LLM 引擎：`README.zh.llm.gpt-4o-mini.md`
+
+便于同时保留多种翻译版本进行对比。
+
+### 使用 LLM（大模型）翻译
+
+从 vX.X 起支持通过大语言模型进行翻译，上下文与术语表现更好，输出文件名会带 `.llm.<模型名>`（如 `README.zh.llm.gpt-4o-mini.md`）。
+
+**三步启用：**
+
+1. **安装依赖**
+   ```bash
+   pip install openai httpx python-dotenv
+   ```
+
+2. **配置 `.env`**（项目根目录，勿提交到 Git）
+   ```bash
+   LLM_MODEL_URL=https://api.openai.com/v1
+   LLM_MODEL_NAME=gpt-4o-mini
+   LLM_MODEL_API_KEY=sk-xxxxxxxxxxxxxxxx
+   # 可选：代理
+   https_proxy=http://127.0.0.1:7890
+   http_proxy=http://127.0.0.1:7890
+   ```
+
+3. **切换引擎并运行**
+   - 在 `src/config.yaml` 中设置 `translator: llm`，其余配置（`target_langs`、`src_filenames`、`threads` 等）与传统引擎相同。
+   - 运行：`cd src && python MarkdownTranslator.py -f ../README.md`
+
+**环境变量：**
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `LLM_MODEL_URL` | API 基础地址 | `https://api.openai.com/v1` |
+| `LLM_MODEL_NAME` | 模型名 | `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`、`glm-4` |
+| `LLM_MODEL_API_KEY` | API 密钥 | `sk-xxxx...` |
+
+**支持的服务**：所有 OpenAI 兼容 API，如 OpenAI、DeepSeek、通义千问（`dashscope.aliyuncs.com/compatible-mode/v1`）、智谱（`open.bigmodel.cn/api/paas/v4/`）等。国内使用 OpenAI 时可在 `.env` 中配置 `https_proxy`/`http_proxy`。
+
+**常见问题：**
+- 提示缺少 API Key → 确认项目根目录有 `.env` 且含 `LLM_MODEL_API_KEY`。
+- 导入失败 → 执行 `pip install openai httpx python-dotenv`。
+- 切换回传统引擎 → 在 `config.yaml` 中把 `translator: llm` 改为 `translator: google` 等。
 
 ## 配置
 
