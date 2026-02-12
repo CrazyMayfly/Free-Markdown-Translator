@@ -104,15 +104,18 @@ options:
 1. `insert_warnings`: 控制是否在文档前面添加由机器翻译的警告
 2. `src_language`: 指定源语言，auto表示由谷歌自动识别
 3. `target_langs`: 需要翻译的目标语言
-4. `translator`: 使用的翻译引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
-5. `src_filenames`: 文件目录下需要自动检测并翻译的Markdown文档的名称
-6. `threads`: 翻译时使用的最大线程数
-7. `proxy`: 配置代理
-8. `warnings_mapping`: 对应语言的由机器翻译警告的具体内容
-9. `compact_langs`:紧凑型语言，解决英语等非紧凑型语言的分隔问题
-10. `front_matter_transparent_keys`: markdown的Front Matter中不用翻译的部分
-11. `front_matter_key_value_keys`: Front Matter中需要以Key-Value形式翻译的部分
-12. `front_matter_key_value_array_keys`: Front Matter中以Key-Value-Arrays形式翻译
+4. `translator`: 使用的翻译引擎，支持 google, bing, alibaba, sogou, youdao, tencent, baidu；设为 `llm` 时使用大语言模型翻译（需配置 `.env` 或下方 `llm_config`）
+5. `llm_config`:（可选）LLM 翻译器配置，仅当 `translator: llm` 时生效；不配置则从项目根目录 `.env` 读取
+6. `src_filenames`: 文件目录下需要自动检测并翻译的Markdown文档的名称
+7. `threads`: 翻译时使用的最大线程数
+8. `chunk_size_chars`: 每个 chunk 的目标字符数（影响分段长度）
+9. `llm_context_before_lines` / `llm_context_after_lines`: 仅当 `translator: llm` 时生效，为每个 chunk 提供的上下文行数
+10. `proxy`: 配置代理
+11. `warnings_mapping`: 对应语言的由机器翻译警告的具体内容
+12. `compact_langs`: 紧凑型语言，解决英语等非紧凑型语言的分隔问题
+13. `front_matter_transparent_keys`: markdown的Front Matter中不用翻译的部分
+14. `front_matter_key_value_keys`: Front Matter中需要以Key-Value形式翻译的部分
+15. `front_matter_key_value_array_keys`: Front Matter中以Key-Value-Arrays形式翻译
 
 示例配置文件：
 
@@ -130,8 +133,17 @@ target_langs:
   - ja
   - ru
 
-# 使用的翻译引擎，支持google, bing, alibaba, sogou, youdao, tencent, baidu等翻译引擎
+# 使用的翻译引擎，支持 google, bing, alibaba, sogou, youdao, tencent, baidu；
+# 设置为 'llm' 使用大语言模型进行翻译（需配置 .env 或下方 llm_config）
 translator: google
+# ---------- 可选：LLM 翻译器配置（仅当 translator: llm 时生效）----------
+# 不配置则从项目根目录 .env 读取 LLM_MODEL_URL / LLM_MODEL_NAME / LLM_MODEL_API_KEY
+# llm_config:
+#   api_base: 'https://api.openai.com/v1'
+#   model: gpt-4o-mini
+#   api_key: 'sk-xxx'
+#   temperature: 0.3
+#   max_tokens: 2000
 
 # 文件目录下需要翻译的文档的名称
 src_filenames:
@@ -141,6 +153,11 @@ src_filenames:
 
 # 翻译时使用的最大线程数，不超过30，小于等于0表示使用默认线程数
 threads: -1
+
+# --- chunking / LLM 上下文窗口（仅 translator=llm 时后两项生效）---
+chunk_size_chars: 500
+llm_context_before_lines: 0
+llm_context_after_lines: 0
 
 # 配置代理
 proxy:
