@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink, RouterView, useRouter } from "vue-router";
+import { getApiBase } from "./api/client";
 import { checkConnection, connection } from "./connection";
+import { isTauri } from "./tauri";
 
 const router = useRouter();
 const theme = ref<"corporate" | "dim">(
@@ -15,6 +17,16 @@ function applyTheme(value: "corporate" | "dim") {
 }
 
 onMounted(() => applyTheme(theme.value));
+
+function retryConnection() {
+  // In the Tauri shell a missed handshake can only be recovered by re-running
+  // the bootstrap (the sidecar may already be listening by now).
+  if (isTauri() && !getApiBase()) {
+    window.location.reload();
+    return;
+  }
+  void checkConnection();
+}
 
 const navItems = [
   { to: "/submit", label: "新建任务", icon: "M12 5v14m-7-7h14" },
@@ -52,7 +64,7 @@ const navItems = [
         <button
           class="flex items-center justify-between rounded-lg px-2 py-1.5 text-xs text-base-content/60 hover:bg-base-200"
           title="点击重新检测连接"
-          @click="checkConnection()"
+          @click="retryConnection()"
         >
           <span class="flex items-center gap-2">
             <span
@@ -82,7 +94,7 @@ const navItems = [
         class="alert alert-warning rounded-none py-2 text-sm"
       >
         <span class="truncate">{{ connection.error ?? "无法连接后端服务" }}</span>
-        <button class="btn btn-xs btn-outline" @click="checkConnection()">重试</button>
+        <button class="btn btn-xs btn-outline" @click="retryConnection()">重试</button>
       </div>
       <main class="min-h-0 flex-1 overflow-y-auto">
         <div class="mx-auto w-full max-w-6xl p-6">

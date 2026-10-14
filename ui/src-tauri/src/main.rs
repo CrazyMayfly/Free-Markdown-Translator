@@ -4,9 +4,11 @@
 // 1. pick a free 127.0.0.1 port,
 // 2. spawn the Python API sidecar on it (dev: the repo's .venv mdtx CLI;
 //    release: the PyInstaller-built `mdtx-api` binary placed next to the app),
-// 3. wait until the port accepts TCP, then emit `api-ready` so the frontend
-//    can point its HTTP/SSE client at the right base URL,
-// 4. kill the sidecar when the app exits.
+// 3. wait until the port accepts TCP, then expose the port to the frontend —
+//    primarily via the `api_ready_state` command (race-free: the frontend
+//    invokes it after mount), with an `api-ready` event as a push fallback,
+// 4. kill the sidecar when the app exits; the sidecar additionally watches
+//    its parent PID and self-exits if the shell dies.
 //
 // Spawn failures must NOT panic (that would show a blank window); the shell
 // emits `api-error` instead and the UI renders a connection-lost screen.
@@ -18,7 +20,13 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
-struct Sidecar(Mutex<Option<Child>>);
+/// Port of the sidecar once it accepts connections; None until then.
+struct ApiPort(Mutex<Option<u16>>);
+
+#[tauri::command]
+fn api_ready_state(port: tauri::State<ApiPort>) -> Option<u16> {
+    *port.0.lock().unwrap()
+}
 
 fn pick_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -53,7 +61,12 @@ fn sidecar_command(port: u16) -> Result<Command, String> {
             .expect("exe dir")
             .join("mdtx-api");
         let mut command = Command::new(exe);
-        command.args(["--port", &port_arg]);
+        command.args([
+            "--port",
+            &port_arg,
+            "--parent-pid",
+            &std::process::id().to_string(),
+        ]);
         Ok(command)
     }
 }
@@ -70,24 +83,39 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
     false
 }
 
+fn kill_sidecar(sidecar: &Mutex<Option<Child>>) {
+    if let Some(mut child) = sidecar.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 fn main() {
     let port = pick_free_port();
 
     let app = tauri::Builder::default()
-        .manage(Sidecar(Mutex::new(None)))
+        .manage(ApiPort(Mutex::new(None)))
+        .manage(Mutex::<Option<Child>>::new(None))
+        .invoke_handler(tauri::generate_handler![api_ready_state])
         .setup(move |app| {
             let outcome = (|| -> Result<bool, String> {
                 let mut command = sidecar_command(port)?;
                 let child = command
                     .spawn()
                     .map_err(|err| format!("sidecar spawn failed: {err}"))?;
-                *app.state::<Sidecar>().0.lock().unwrap() = Some(child);
-                Ok(wait_for_port(port, Duration::from_secs(30)))
+                *app.state::<Mutex<Option<Child>>>().lock().unwrap() = Some(child);
+                Ok(wait_for_port(port, Duration::from_secs(60)))
             })();
             match outcome {
-                Ok(true) => app.emit("api-ready", port)?,
+                Ok(true) => {
+                    *app.state::<ApiPort>().0.lock().unwrap() = Some(port);
+                    app.emit("api-ready", port)?;
+                }
                 Ok(false) => {
-                    app.emit("api-error", format!("sidecar did not listen on {port} in time"))?;
+                    app.emit(
+                        "api-error",
+                        format!("后端服务未能在 60 秒内启动（端口 {port}）"),
+                    )?;
                 }
                 Err(message) => {
                     app.emit("api-error", message)?;
@@ -98,12 +126,13 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app, event| {
-        if let tauri::RunEvent::Exit = event {
-            if let Some(mut child) = app.state::<Sidecar>().0.lock().unwrap().take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+    app.run(|app, event| match event {
+        tauri::RunEvent::Exit => {
+            kill_sidecar(app.state::<Mutex<Option<Child>>>().inner());
         }
+        tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Destroyed, .. } => {
+            kill_sidecar(app.state::<Mutex<Option<Child>>>().inner());
+        }
+        _ => {}
     });
 }

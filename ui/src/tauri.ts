@@ -14,7 +14,21 @@ export async function resolveApiBase(): Promise<ConnectionResult> {
   if (!tauri) {
     return { base: "", error: null };
   }
+  const { invoke } = await import("@tauri-apps/api/core");
   const { listen } = await import("@tauri-apps/api/event");
+
+  // Race-free initial query: the shell stores the port once the sidecar
+  // accepts connections, so a command issued at any later moment succeeds
+  // even if the api-ready event fired before this page started listening.
+  try {
+    const port = (await invoke("api_ready_state")) as number | null;
+    if (typeof port === "number") {
+      return { base: `http://127.0.0.1:${port}`, error: null };
+    }
+  } catch {
+    /* command unavailable (old shell?) — fall through to events */
+  }
+
   return new Promise<ConnectionResult>((resolve) => {
     let settled = false;
     const finish = (result: ConnectionResult) => {
@@ -30,8 +44,9 @@ export async function resolveApiBase(): Promise<ConnectionResult> {
     const errorUnlisten = listen<string>("api-error", (event) => {
       finish({ base: "", error: String(event.payload) });
     });
-    // Fallback: never block the UI forever if the sidecar is slow to emit.
-    setTimeout(() => finish({ base: "", error: "等待后端服务启动超时" }), 35000);
+    // The sidecar may legitimately take a while on first launch (binary
+    // extraction, Gatekeeper scan); give it generous time before failing.
+    setTimeout(() => finish({ base: "", error: "后端服务启动超时，请重启应用；若反复出现请查看应用日志" }), 90000);
   });
 }
 
