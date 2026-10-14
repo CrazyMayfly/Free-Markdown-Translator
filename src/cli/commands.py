@@ -33,6 +33,7 @@ def _build_provider(config: TranslatorConfig):
             model=config.provider.model,
             temperature=config.provider.temperature,
             max_tokens=config.provider.max_tokens,
+            structured_outputs=config.provider.structured_outputs,
         )
     raise ValueError(f"Provider {config.provider.name} is not implemented.")
 

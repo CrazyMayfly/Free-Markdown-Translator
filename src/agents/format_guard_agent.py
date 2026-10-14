@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.agents.prompts import build_guard_prompts
 from src.core.types import SegmentBundle, TranslationResult
 from src.llm.provider import LLMProvider
+from src.llm.schemas import TRANSLATION_RESPONSE_SCHEMA
 
 
 class FormatGuardAgent:
@@ -14,7 +15,12 @@ class FormatGuardAgent:
             return translations
 
         system_prompt, user_prompt = build_guard_prompts(bundle, translations)
-        payload = self.provider.chat_json(system_prompt, user_prompt, call_label="format_guard")
+        payload = self.provider.chat_json(
+            system_prompt,
+            user_prompt,
+            call_label="format_guard",
+            response_schema=TRANSLATION_RESPONSE_SCHEMA,
+        )
         repaired = {item["segment_id"]: item for item in payload.get("translations", [])}
         results: list[TranslationResult] = []
         for item in translations:

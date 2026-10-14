@@ -21,6 +21,7 @@ class ProviderConfig:
     model: str = "gpt-5-mini"
     temperature: float = 0.2
     max_tokens: int = 8000
+    structured_outputs: str = "auto"
 
 
 @dataclass
@@ -134,6 +135,7 @@ def _default_config_dict() -> dict[str, Any]:
             "model": "gpt-5-mini",
             "temperature": 0.2,
             "max_tokens": 8000,
+            "structured_outputs": "auto",
         },
         "pipeline": {
             "mode": "balanced",
@@ -190,6 +192,9 @@ provider:
   temperature: 0.2
   # 单次响应的最大 token 数。
   max_tokens: 8000
+  # 结构化输出模式：auto = 优先 json_schema 受限解码、端点不支持时自动降级；
+  # on = 强制 json_schema；off = 始终使用 json_object。
+  structured_outputs: auto
 
 # 翻译流程控制。
 pipeline:

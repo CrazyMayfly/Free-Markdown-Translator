@@ -41,16 +41,18 @@ Paragraph with `code` and [link](https://example.com).
 class FakeProvider:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.schemas: list[dict | None] = []
 
     def get_usage_summary(self):
         from src.core.types import ApiUsageSummary
 
         return ApiUsageSummary()
 
-    def chat_json(self, system_prompt: str, user_prompt: str, call_label: str = "llm"):
+    def chat_json(self, system_prompt: str, user_prompt: str, call_label: str = "llm", response_schema: dict | None = None):
         del system_prompt
         import json
 
+        self.schemas.append(response_schema)
         payload = json.loads(user_prompt)
         task = payload["task"]
         self.calls.append(call_label)

@@ -4,6 +4,7 @@ from src.core.errors import TranslationPipelineError
 from src.agents.prompts import build_translator_prompts
 from src.core.types import DocumentContext, SegmentBundle, TranslationResult
 from src.llm.provider import LLMProvider
+from src.llm.schemas import TRANSLATION_RESPONSE_SCHEMA
 
 
 class TranslatorAgent:
@@ -15,7 +16,12 @@ class TranslatorAgent:
             raise TranslationPipelineError("No LLM provider configured; cannot perform translation.")
 
         system_prompt, user_prompt = build_translator_prompts(bundle, context, target_lang)
-        payload = self.provider.chat_json(system_prompt, user_prompt, call_label="translate")
+        payload = self.provider.chat_json(
+            system_prompt,
+            user_prompt,
+            call_label="translate",
+            response_schema=TRANSLATION_RESPONSE_SCHEMA,
+        )
         results = [
             TranslationResult(
                 segment_id=item["segment_id"],

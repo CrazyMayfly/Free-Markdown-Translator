@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.agents.prompts import build_reviewer_prompts
 from src.core.types import DocumentContext, SegmentBundle, TranslationResult
 from src.llm.provider import LLMProvider
+from src.llm.schemas import TRANSLATION_RESPONSE_SCHEMA
 
 
 class ReviewerAgent:
@@ -14,7 +15,12 @@ class ReviewerAgent:
             return translations
 
         system_prompt, user_prompt = build_reviewer_prompts(bundle, context, translations)
-        payload = self.provider.chat_json(system_prompt, user_prompt, call_label="review")
+        payload = self.provider.chat_json(
+            system_prompt,
+            user_prompt,
+            call_label="review",
+            response_schema=TRANSLATION_RESPONSE_SCHEMA,
+        )
         updated = {item["segment_id"]: item for item in payload.get("translations", [])}
         results: list[TranslationResult] = []
         for item in translations:
