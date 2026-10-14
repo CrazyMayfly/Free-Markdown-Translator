@@ -1,5 +1,5 @@
-// API base: empty in dev (vite proxy), set from the Tauri `api-ready` event
-// in production via setApiBase().
+// API client. Base is empty in dev (vite proxy) and set from the Tauri
+// `api-ready` event in production via setApiBase().
 let apiBase = window.__MDTX_API_BASE__ ?? "";
 
 export function setApiBase(base: string): void {
@@ -8,6 +8,60 @@ export function setApiBase(base: string): void {
 
 export function getApiBase(): string {
   return apiBase;
+}
+
+/** Raised for every failed API call with a user-presentable message. */
+export class ApiError extends Error {
+  readonly kind: "network" | "status";
+  readonly status?: number;
+
+  constructor(kind: "network" | "status", message: string, status?: number) {
+    super(message);
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+function friendlyStatusError(status: number, detail: string): string {
+  if (status === 502 || status === 504) {
+    return `无法连接 mdtx 后端服务（${detail}）。请确认 API 已启动：mdtx --ui-port 8000`;
+  }
+  if (status === 404) return "请求的资源不存在（后端版本不匹配？）";
+  return detail || `请求失败（HTTP ${status}）`;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, init);
+  } catch {
+    throw new ApiError(
+      "network",
+      "无法连接 mdtx 后端服务。请确认 API 已启动（浏览器模式下：mdtx --ui-port 8000）。",
+    );
+  }
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      try {
+        const body = (await response.json()) as { detail?: unknown };
+        if (typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* keep default detail */
+      }
+    }
+    throw new ApiError("status", friendlyStatusError(response.status, detail), response.status);
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new ApiError(
+      "status",
+      "后端返回了非 JSON 响应，API 基地址可能指向了错误的服务。",
+      response.status,
+    );
+  }
+  return (await response.json()) as T;
 }
 
 export interface AppConfig {
@@ -100,22 +154,8 @@ export interface FsEntry {
   is_markdown: boolean;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, init);
-  if (!response.ok) {
-    let detail = `${response.status}`;
-    try {
-      const body = await response.json();
-      detail = body.detail ?? detail;
-    } catch {
-      /* keep status code */
-    }
-    throw new Error(String(detail));
-  }
-  return (await response.json()) as T;
-}
-
 export const api = {
+  health: () => request<{ status: string }>("/api/health"),
   getConfig: () => request<{ config: AppConfig; config_path: string }>("/api/config"),
   patchConfig: (patch: Partial<AppConfig>) =>
     request<{ config: AppConfig; config_path: string }>("/api/config", {

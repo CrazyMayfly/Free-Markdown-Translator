@@ -5,6 +5,7 @@ const router = createRouter({
   routes: [
     { path: "/", redirect: "/submit" },
     { path: "/submit", name: "submit", component: () => import("./views/SubmitView.vue") },
+    { path: "/jobs", name: "jobs", component: () => import("./views/JobsView.vue") },
     { path: "/run/:id", name: "run", component: () => import("./views/RunView.vue") },
     { path: "/result/:id", name: "result", component: () => import("./views/ResultView.vue") },
     { path: "/config", name: "config", component: () => import("./views/ConfigView.vue") },

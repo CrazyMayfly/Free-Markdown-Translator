@@ -7,12 +7,18 @@
 // 3. wait until the port accepts TCP, then emit `api-ready` so the frontend
 //    can point its HTTP/SSE client at the right base URL,
 // 4. kill the sidecar when the app exits.
+//
+// Spawn failures must NOT panic (that would show a blank window); the shell
+// emits `api-error` instead and the UI renders a connection-lost screen.
 
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+
+struct Sidecar(Mutex<Option<Child>>);
 
 fn pick_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -22,7 +28,7 @@ fn pick_free_port() -> u16 {
         .port()
 }
 
-fn spawn_api(port: u16) -> Child {
+fn sidecar_command(port: u16) -> Result<Command, String> {
     let port_arg = port.to_string();
     #[cfg(debug_assertions)]
     {
@@ -31,13 +37,13 @@ fn spawn_api(port: u16) -> Child {
         let repo = manifest
             .parent()
             .and_then(|p| p.parent())
-            .expect("repo root")
+            .ok_or("cannot locate repo root")?
             .to_path_buf();
-        Command::new(repo.join(".venv/bin/mdtx"))
+        let mut command = Command::new(repo.join(".venv/bin/mdtx"));
+        command
             .args(["--ui-port", &port_arg, "--ui-headless"])
-            .current_dir(repo)
-            .spawn()
-            .expect("spawn mdtx API (dev)")
+            .current_dir(repo);
+        Ok(command)
     }
     #[cfg(not(debug_assertions))]
     {
@@ -46,10 +52,9 @@ fn spawn_api(port: u16) -> Child {
             .parent()
             .expect("exe dir")
             .join("mdtx-api");
-        Command::new(exe)
-            .args(["--port", &port_arg])
-            .spawn()
-            .expect("spawn mdtx API sidecar")
+        let mut command = Command::new(exe);
+        command.args(["--port", &port_arg]);
+        Ok(command)
     }
 }
 
@@ -67,24 +72,38 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
 
 fn main() {
     let port = pick_free_port();
-    let mut child = spawn_api(port);
 
     let app = tauri::Builder::default()
+        .manage(Sidecar(Mutex::new(None)))
         .setup(move |app| {
-            if wait_for_port(port, Duration::from_secs(30)) {
-                app.emit("api-ready", port)?;
-            } else {
-                app.emit("api-error", port)?;
+            let outcome = (|| -> Result<bool, String> {
+                let mut command = sidecar_command(port)?;
+                let child = command
+                    .spawn()
+                    .map_err(|err| format!("sidecar spawn failed: {err}"))?;
+                *app.state::<Sidecar>().0.lock().unwrap() = Some(child);
+                Ok(wait_for_port(port, Duration::from_secs(30)))
+            })();
+            match outcome {
+                Ok(true) => app.emit("api-ready", port)?,
+                Ok(false) => {
+                    app.emit("api-error", format!("sidecar did not listen on {port} in time"))?;
+                }
+                Err(message) => {
+                    app.emit("api-error", message)?;
+                }
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(move |_app, event| {
+    app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Some(mut child) = app.state::<Sidecar>().0.lock().unwrap().take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
     });
 }

@@ -126,6 +126,10 @@ def create_app(memory: object | None = None, config_loader=None) -> FastAPI:
     app.state.jobs = JobManager(memory=memory, config_loader=config_loader)
 
     config_router = APIRouter(prefix="/api")
+
+    @config_router.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
     jobs_router = APIRouter(prefix="/api/jobs")
     misc_router = APIRouter(prefix="/api")
 
