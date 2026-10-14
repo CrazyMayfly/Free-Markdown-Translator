@@ -116,6 +116,8 @@ export interface JobSummary {
   pairs: string[];
   usage: { prompt: number; completion: number; total: number; cached: number; calls: number };
   result_count: number;
+  /** Present on job details and history records; enables "reuse" prefill. */
+  params?: Partial<JobParams>;
 }
 
 export interface SegmentPair {
@@ -141,10 +143,21 @@ export interface JobResult {
     comments?: string[];
     error?: string;
   } | null;
+  /** Set when translation succeeded but writing the file failed. */
+  write_error?: string | null;
 }
 
 export interface JobDetail extends JobSummary {
   results: JobResult[];
+}
+
+export interface ConfigTestResult {
+  ok: boolean;
+  base_url: string;
+  latency_ms: number | null;
+  models?: string[];
+  model_warning?: string | null;
+  error: string | null;
 }
 
 export interface FsEntry {
@@ -177,6 +190,32 @@ export const api = {
   getJob: (id: string) => request<JobDetail>(`/api/jobs/${id}`),
   cancelJob: (id: string) =>
     request<{ id: string; cancel_requested: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  listHistory: () => request<JobSummary[]>("/api/history"),
+  deleteHistory: (id: string) => request<{ id: string; deleted: boolean }>(`/api/history/${id}`, { method: "DELETE" }),
+  updateSegment: (id: string, resultIndex: number, segmentId: string, text: string) =>
+    request<{ result: JobResult }>(`/api/jobs/${id}/results/${resultIndex}/segments/${encodeURIComponent(segmentId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  saveResult: (id: string, resultIndex: number, path?: string | null) =>
+    request<{ path: string }>(`/api/jobs/${id}/results/${resultIndex}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: path ?? null }),
+    }),
+  testConfig: (body: { base_url?: string; api_key?: string; model?: string }) =>
+    request<ConfigTestResult>("/api/config/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  revealPath: (path: string) =>
+    request<{ revealed: string }>("/api/fs/reveal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }),
   memoryStats: () => request<{ hits: number; misses: number; entries: number }>("/api/memory/stats"),
   clearMemory: () => request<{ removed: number }>("/api/memory", { method: "DELETE" }),
   listCheckpoints: () =>

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability for the main window: core events for api-ready handshake.",
+  "description": "Default capability for the main window: core events for api-ready handshake plus desktop notifications.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "notification:default"]
 }

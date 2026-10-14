@@ -99,6 +99,7 @@ fn main() {
     let port = pick_free_port();
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(ApiPort(Mutex::new(None)))
         .manage(Mutex::<Option<Child>>::new(None))
         .invoke_handler(tauri::generate_handler![api_ready_state])

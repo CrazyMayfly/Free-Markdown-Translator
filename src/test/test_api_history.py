@@ -131,6 +131,44 @@ class HistoryPersistenceTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_live_edit_resave_keeps_params_in_history(self) -> None:
+        """Re-saving history from the live-job edit path must not drop params."""
+        async def scenario():
+            with tempfile.TemporaryDirectory() as temp_dir:
+                sample = _write_sample(temp_dir)
+                output_dir = Path(temp_dir) / "out"
+                history_path = Path(temp_dir) / "history.sqlite3"
+                from src.test.test_api_layer import FakeUiPipeline
+
+                pipeline = FakeUiPipeline()
+                app = create_app(history=JobHistory(history_path), config_loader=lambda: _config(str(output_dir)))
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                    with patch("src.api.jobs.build_pipeline", return_value=pipeline):
+                        response = await client.post(
+                            "/api/jobs",
+                            json={"paths": [str(sample)], "target_langs": ["zh-CN"], "output_dir": str(output_dir)},
+                        )
+                        job_id = response.json()["id"]
+                        for _ in range(100):
+                            detail = (await client.get(f"/api/jobs/{job_id}")).json()
+                            if detail["status"] in {"completed", "failed", "cancelled"}:
+                                break
+                            await asyncio.sleep(0.05)
+
+                        edited = await client.put(
+                            f"/api/jobs/{job_id}/results/0/segments/body-0",
+                            json={"text": "改"},
+                        )
+                        self.assertEqual(edited.status_code, 200, edited.text)
+
+                        record = JobHistory(history_path).get(job_id)
+                        self.assertIsNotNone(record)
+                        self.assertIsNotNone(record.get("params"))
+                        self.assertEqual(record["params"]["target_langs"], ["zh-CN"])
+
+        asyncio.run(scenario())
+
     def test_segment_edit_and_save_from_history(self) -> None:
         async def scenario():
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -244,10 +282,33 @@ class ConfigTestRouteTests(unittest.TestCase):
                     self.assertEqual(body.status_code, 200, body.text)
                     data = body.json()
                     self.assertTrue(data["ok"])
+                    self.assertIsNone(data["model_warning"])
                     self.assertEqual(data["models"], ["fast", "big"])
                     self.assertIsInstance(data["latency_ms"], int)
                     called_url = mock_get.call_args.args[0]
                     self.assertEqual(called_url, "http://mini:8010/v1/models")
+
+        asyncio.run(scenario())
+
+    def test_probe_unknown_model_warns_but_stays_ok(self) -> None:
+        async def scenario():
+            app = _app_with_history(None, tempfile.gettempdir())
+            transport = httpx.ASGITransport(app=app)
+            fake_response = SimpleNamespace(
+                status_code=200,
+                text="",
+                json=lambda: {"data": [{"id": "glm-5.3"}]},
+            )
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                with patch("httpx.get", return_value=fake_response):
+                    body = await client.post(
+                        "/api/config/test",
+                        json={"base_url": "http://mini:8010/v1", "model": "fast"},
+                    )
+                    data = body.json()
+                    # Virtual aliases work on many gateways despite /models.
+                    self.assertTrue(data["ok"])
+                    self.assertIn("fast", data["model_warning"])
 
         asyncio.run(scenario())
 

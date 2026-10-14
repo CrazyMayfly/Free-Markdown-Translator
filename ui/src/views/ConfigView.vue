@@ -11,6 +11,8 @@ const saving = ref(false);
 const message = ref("");
 const messageKind = ref<"success" | "error">("success");
 const memoryStats = ref<{ hits: number; misses: number; entries: number } | null>(null);
+const testing = ref(false);
+const testResult = ref<{ ok: boolean; text: string } | null>(null);
 
 const termsText = ref("");
 const instructionsText = ref("");
@@ -77,6 +79,33 @@ async function save() {
     show(String(error), "error");
   } finally {
     saving.value = false;
+  }
+}
+
+async function testConnection() {
+  if (!config.value) return;
+  testing.value = true;
+  testResult.value = null;
+  try {
+    const result = await api.testConfig({
+      base_url: config.value.provider.base_url,
+      api_key: apiKeyInput.value || undefined,
+      model: config.value.provider.model,
+    });
+    if (result.ok) {
+      const models = result.models?.length ? `，网关模型 ${result.models.length} 个` : "";
+      if (result.model_warning) {
+        testResult.value = { ok: false, text: `连接成功（${result.latency_ms}ms${models}）；${result.model_warning}` };
+      } else {
+        testResult.value = { ok: true, text: `连接成功（${result.latency_ms}ms${models}），模型 ${config.value.provider.model} 可用` };
+      }
+    } else {
+      testResult.value = { ok: false, text: result.error ?? "连接失败" };
+    }
+  } catch (error) {
+    testResult.value = { ok: false, text: String(error) };
+  } finally {
+    testing.value = false;
   }
 }
 
@@ -159,6 +188,15 @@ onMounted(load);
                 <option value="off">off（始终 json_object）</option>
               </select>
             </label>
+            <div class="flex items-center gap-3">
+              <button class="btn btn-outline btn-sm" :disabled="testing" @click="testConnection">
+                <span v-if="testing" class="loading loading-spinner loading-xs"></span>
+                测试连接
+              </button>
+              <span v-if="testResult" class="text-xs" :class="testResult.ok ? 'text-success' : 'text-error'">
+                {{ testResult.text }}
+              </span>
+            </div>
           </div>
         </div>
 

@@ -17,6 +17,7 @@ const resume = ref(false);
 const outputDir = ref("");
 const submitting = ref(false);
 const errorMessage = ref("");
+const reusedNotice = ref(false);
 
 const MODES = [
   { value: "fast", title: "快速", desc: "跳过反思审校，速度最快", icon: "⚡" },
@@ -154,6 +155,43 @@ async function submit() {
   }
 }
 
+/** "再来一次"预填：JobsView 会把上次任务的参数存进 sessionStorage。 */
+interface ReuseParams {
+  paths: string[];
+  target_langs: string[];
+  output_dir: string | null;
+  mode: string | null;
+  tone: string | null;
+  model: string | null;
+  evaluate: boolean;
+}
+
+function applyReuse() {
+  const raw = sessionStorage.getItem("mdtx-reuse");
+  if (!raw) return;
+  sessionStorage.removeItem("mdtx-reuse");
+  try {
+    const reuse = JSON.parse(raw) as Partial<ReuseParams>;
+    if (reuse.paths?.length) {
+      selected.value = reuse.paths.map((path) => ({
+        path,
+        is_dir: !/\.(md|markdown)$/i.test(path),
+      }));
+    }
+    if (reuse.target_langs?.length) {
+      selectedLangs.value = reuse.target_langs
+        .map((lang) => LANG_PRESETS.find((p) => p.toLowerCase() === lang.toLowerCase()) ?? lang)
+        .slice(0, 6);
+    }
+    if (reuse.mode && MODES.some((m) => m.value === reuse.mode)) mode.value = reuse.mode;
+    if (reuse.output_dir) outputDir.value = reuse.output_dir;
+    evaluate.value = Boolean(reuse.evaluate);
+    reusedNotice.value = true;
+  } catch {
+    /* ignore malformed reuse payload */
+  }
+}
+
 onMounted(async () => {
   try {
     const data = await api.getConfig();
@@ -169,6 +207,7 @@ onMounted(async () => {
   } catch {
     /* 连接状态由全局横幅呈现 */
   }
+  applyReuse();
   await setupNativeDrop();
 });
 onUnmounted(() => unlistenDrop?.());
@@ -179,6 +218,12 @@ onUnmounted(() => unlistenDrop?.());
     <div>
       <h1 class="text-xl font-bold">新建翻译任务</h1>
       <p class="mt-1 text-sm text-base-content/60">添加 Markdown 文件或整个目录，选择目标语言后开始。</p>
+    </div>
+
+    <!-- 复用提示 -->
+    <div v-if="reusedNotice" role="status" class="alert alert-info py-2 text-sm">
+      <span>已按上次任务的设置预填，可调整后再次开始。</span>
+      <button class="btn btn-ghost btn-xs" @click="reusedNotice = false">✕</button>
     </div>
 
     <!-- 拖拽区 -->

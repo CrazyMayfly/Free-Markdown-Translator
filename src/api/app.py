@@ -238,7 +238,7 @@ def create_app(memory: object | None = None, config_loader=None, history: JobHis
             target["translated"] = body.text
             if app.state.history is not None:
                 try:
-                    app.state.history.save(job.summary(), job.results)
+                    app.state.history.save({**job.summary(), "params": job.params.model_dump()}, job.results)
                 except Exception:
                     logging.exception("Failed to persist edited job %s", job_id)
             return {"result": result}
@@ -365,13 +365,17 @@ def create_app(memory: object | None = None, config_loader=None, history: JobHis
             model_ids = [item.get("id") for item in response.json().get("data", [])]
         except ValueError:
             model_ids = []
-        has_model = bool(model) and (not model_ids or model in model_ids)
+        # Some gateways serve virtual aliases (e.g. "fast") that /models does
+        # not list but chat completions accept — a missing model is a warning,
+        # not a failed connection.
+        model_warning = model and model_ids and model not in model_ids
         return {
-            "ok": has_model,
+            "ok": True,
             "base_url": base_url,
             "latency_ms": latency_ms,
             "models": model_ids,
-            "error": None if has_model else f"模型 {model} 不在可用列表中",
+            "model_warning": f"模型 {model} 不在网关模型列表中，请确认名称是否正确" if model_warning else None,
+            "error": None,
         }
 
     @misc_router.post("/fs/reveal")

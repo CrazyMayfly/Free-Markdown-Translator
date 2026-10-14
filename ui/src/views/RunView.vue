@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, type JobDetail, type JobSummary } from "../api/client";
 import { useJobEvents, type JobEvent } from "../composables/useSSE";
+import { ensureNotifyPermission, notifyApp } from "../notify";
 
 const route = useRoute();
 const router = useRouter();
@@ -11,12 +12,14 @@ const jobId = String(route.params.id ?? "");
 const summary = ref<JobSummary | null>(null);
 const detail = ref<JobDetail | null>(null);
 const events = ref<JobEvent[]>([]);
-const connected = ref(false);
 const finished = ref(false);
+const notified = ref(false);
 const currentPair = ref("");
 const pairProgress = ref({ done: 0, total: 0 });
 const pairLog = ref<{ key: string; input: string; lang: string; done: number; total: number }[]>([]);
+const writeErrors = ref<string[]>([]);
 const usage = ref({ prompt: 0, completion: 0, total: 0, cached: 0, calls: 0 });
+let pollTimer: number | null = null;
 
 const statusMeta = computed(() => {
   const status = summary.value?.status ?? "queued";
@@ -47,6 +50,20 @@ function fileName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
+function statusLabel(status: string) {
+  return { completed: "已完成", failed: "失败", cancelled: "已取消" }[status] ?? status;
+}
+
+async function maybeNotify(status: string) {
+  if (notified.value) return;
+  notified.value = true;
+  if (document.hidden || !document.hasFocus()) {
+    await ensureNotifyPermission();
+    const writeNote = writeErrors.value.length ? `（${writeErrors.value.length} 个结果写文件失败，译文已在结果页保留）` : "";
+    void notifyApp(`翻译任务${statusLabel(status)}`, `任务 ${jobId.slice(0, 8)} · ${summary.value?.pairs.length ?? 0} 个翻译对${writeNote}`);
+  }
+}
+
 function onEvent(event: JobEvent) {
   events.value.push(event);
   if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
@@ -72,9 +89,15 @@ function onEvent(event: JobEvent) {
       });
     }
   }
+  if (event.type === "pair_done" && event.write_error) {
+    writeErrors.value.push(`${fileName(event.input ?? "")} → ${event.lang}`);
+  }
   if (event.type === "status") {
     if (summary.value) summary.value.status = event.status ?? summary.value.status;
-    if (["completed", "failed", "cancelled"].includes(event.status ?? "")) finished.value = true;
+    if (["completed", "failed", "cancelled"].includes(event.status ?? "")) {
+      finished.value = true;
+      void maybeNotify(event.status ?? "");
+    }
   }
 }
 
@@ -83,7 +106,15 @@ async function refresh() {
     detail.value = await api.getJob(jobId);
     summary.value = detail.value;
     usage.value = { ...summary.value.usage };
+    for (const result of detail.value.results ?? []) {
+      if (result.write_error) {
+        const label = `${fileName(result.input_path)} → ${result.target_lang}`;
+        if (!writeErrors.value.includes(label)) writeErrors.value.push(label);
+      }
+    }
+    const wasFinished = finished.value;
     finished.value = ["completed", "failed", "cancelled"].includes(summary.value.status);
+    if (finished.value && !wasFinished) void maybeNotify(summary.value.status);
   } catch {
     /* job may not exist yet */
   }
@@ -95,10 +126,19 @@ async function cancel() {
 
 onMounted(() => {
   void refresh();
+  void ensureNotifyPermission();
   const { connect } = useJobEvents(jobId, onEvent, () => {
     void refresh();
   });
   connect();
+  // Safety net: if SSE dies silently (sleep, network hiccup), keep polling.
+  pollTimer = window.setInterval(() => {
+    if (!finished.value) void refresh();
+  }, 5000);
+});
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) window.clearInterval(pollTimer);
 });
 </script>
 
@@ -120,6 +160,13 @@ onMounted(() => {
     </div>
 
     <div v-if="summary?.error" role="alert" class="alert alert-error text-sm">{{ summary.error }}</div>
+
+    <div v-if="writeErrors.length" role="alert" class="alert alert-warning text-sm">
+      <span>
+        {{ writeErrors.length }} 个结果写入文件失败（{{ writeErrors.join("、") }}），译文已保留，
+        可在结果页手动保存。
+      </span>
+    </div>
 
     <div class="grid gap-4 lg:grid-cols-3">
       <!-- 总进度卡 -->
