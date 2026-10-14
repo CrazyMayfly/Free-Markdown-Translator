@@ -37,7 +37,7 @@ class PipelineConfig:
 @dataclass
 class SegmentationConfig:
     max_bundle_chars: int = 6000
-    max_bundle_segments: int = 36
+    max_bundle_segments: int = 12
 
 
 @dataclass
@@ -48,9 +48,14 @@ class InputConfig:
 @dataclass
 class StyleConfig:
     tone: str = "technical"
-    preserve_terms: list[str] = field(default_factory=list)
+    preserve_terms: list[str] = field(default_factory=lambda: ["Markdown", "OpenAI", "Python"])
     audience: str = "developers"
-    instructions: list[str] = field(default_factory=list)
+    instructions: list[str] = field(
+        default_factory=lambda: [
+            "Keep protected placeholders unchanged.",
+            "Do not alter Markdown control syntax.",
+        ]
+    )
 
 
 @dataclass
@@ -67,7 +72,7 @@ class ExecutionConfig:
 
 @dataclass
 class TranslatorConfig:
-    target_languages: list[str] = field(default_factory=lambda: ["zh-CN"])
+    target_languages: list[str] = field(default_factory=lambda: ["english"])
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
@@ -141,7 +146,7 @@ def _default_config_dict() -> dict[str, Any]:
         },
         "segmentation": {
             "max_bundle_chars": 6000,
-            "max_bundle_segments": 36,
+            "max_bundle_segments": 12,
         },
         "input": {
             "file_pattern": "*.md",
@@ -150,7 +155,10 @@ def _default_config_dict() -> dict[str, Any]:
             "tone": "technical",
             "preserve_terms": ["Markdown", "OpenAI", "Python"],
             "audience": "developers",
-            "instructions": [],
+            "instructions": [
+                "Keep protected placeholders unchanged.",
+                "Do not alter Markdown control syntax.",
+            ],
         },
         "output": {
             "directory": "output",
@@ -193,6 +201,13 @@ pipeline:
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
+  # 以下为 balanced 模式下按条件触发审校的阈值。
+  # bundle 字符数达到该值时触发审校。
+  review_min_bundle_chars: 1600
+  # bundle 段落数达到该值时触发审校。
+  review_min_segments: 6
+  # 翻译结果置信度低于该值时触发审校。
+  review_confidence_threshold: 0.85
 
 # 分段策略。控制一次发送给模型的文本包大小。
 segmentation:
@@ -223,7 +238,7 @@ output:
   # 可用变量：{stem} 原文件名，{lang} 目标语言缩写。
   file_suffix_template: "{stem}.{lang}.md"
   # 是否同时写出 *.report.json 报告。
-  write_report: false
+  write_report: true
 
 # 执行设置。
 execution:

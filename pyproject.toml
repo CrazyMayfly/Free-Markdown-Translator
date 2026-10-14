@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mdtx"
+version = "0.1.0"
+description = "Agent-based Markdown translation pipeline with AST validation and placeholder protection."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "CrazyMayfly" }]
+keywords = ["markdown", "translation", "llm", "agent", "openai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+    "PyYAML~=6.0.2",
+    "colorlog~=6.8.2",
+    "markdown-it-py~=3.0.0",
+    "openai>=1.0.0",
+    "httpx>=0.24.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+mcp = [
+    "mcp>=1.2.0",
+]
+
+[project.scripts]
+mdtx = "src.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/test"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501", # line length handled by formatter threshold above; long prompts allowed
+]

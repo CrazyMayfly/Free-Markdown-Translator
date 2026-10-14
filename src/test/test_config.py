@@ -5,7 +5,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.infra.config import default_user_config_path, initialize_config, load_config, resolve_config_path
+import yaml
+
+from src.infra.config import (
+    _default_config_dict,
+    default_user_config_path,
+    initialize_config,
+    load_config,
+    render_default_config_yaml,
+    resolve_config_path,
+    TranslatorConfig,
+)
 
 
 class ConfigPathTests(unittest.TestCase):
@@ -50,6 +60,24 @@ class ConfigPathTests(unittest.TestCase):
                 load_config()
                 created = home_dir / ".mdtx" / "config.yaml"
                 self.assertTrue(created.exists())
+
+    def test_rendered_template_matches_default_dict(self) -> None:
+        rendered = yaml.safe_load(render_default_config_yaml())
+        self.assertEqual(rendered, _default_config_dict())
+
+    def test_dataclass_defaults_match_default_dict(self) -> None:
+        config = TranslatorConfig()
+        self.assertEqual(config.target_languages, _default_config_dict()["target_languages"])
+        self.assertEqual(config.provider.model, _default_config_dict()["provider"]["model"])
+        self.assertEqual(config.segmentation.max_bundle_segments, _default_config_dict()["segmentation"]["max_bundle_segments"])
+        self.assertEqual(config.segmentation.max_bundle_chars, _default_config_dict()["segmentation"]["max_bundle_chars"])
+        self.assertEqual(config.output.write_report, _default_config_dict()["output"]["write_report"])
+        self.assertEqual(config.execution.max_parallel_translations, _default_config_dict()["execution"]["max_parallel_translations"])
+        self.assertEqual(config.style.instructions, _default_config_dict()["style"]["instructions"])
+        self.assertEqual(config.style.preserve_terms, _default_config_dict()["style"]["preserve_terms"])
+        self.assertEqual(config.pipeline.mode, _default_config_dict()["pipeline"]["mode"])
+        self.assertEqual(config.provider.temperature, _default_config_dict()["provider"]["temperature"])
+        self.assertEqual(config.provider.max_tokens, _default_config_dict()["provider"]["max_tokens"])
 
 
 if __name__ == "__main__":

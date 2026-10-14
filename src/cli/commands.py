@@ -187,7 +187,14 @@ def _run_translation_task(task: TranslationTask, config: TranslatorConfig):
         return task, result
 
 
-def _count_task_bundles(task: TranslationTask, config: TranslatorConfig) -> int:
+def _count_task_bundles(task: TranslationTask, config: TranslatorConfig, cache: dict[Path, int] | None = None) -> int:
+    # Bundle count depends only on the source file, not the target language,
+    # so repeated file x language tasks can share one parse.
+    if cache is not None:
+        key = task.source.input_path.resolve()
+        if key in cache:
+            return cache[key]
+
     parser = MarkdownParser()
     extractor = SegmentExtractor()
     context_builder = DocumentContextBuilder()
@@ -198,7 +205,10 @@ def _count_task_bundles(task: TranslationTask, config: TranslatorConfig) -> int:
     segments = extractor.extract(parsed)
     context = context_builder.build(parsed, segments, config)
     bundles = orchestrator.build_bundles(segments, context, config)
-    return len(bundles)
+    count = len(bundles)
+    if cache is not None:
+        cache[key] = count
+    return count
 
 
 def _log_task_token_usage(task: TranslationTask, usage: ApiUsageSummary) -> None:
@@ -282,7 +292,8 @@ def translate_command(
     tasks = _build_translation_tasks(sources, target_langs, resolved_output_dir, config)
     task_workers = _resolve_parallel_workers(config, len(tasks))
     bundle_workers = _resolve_bundle_workers(config)
-    total_bundles = sum(_count_task_bundles(task, config) for task in tasks)
+    bundle_count_cache: dict[Path, int] = {}
+    total_bundles = sum(_count_task_bundles(task, config, bundle_count_cache) for task in tasks)
     logging.info(
         "Job start: files=%s targets=%s tasks=%s bundles=%s workers=%s/%s",
         len(sources),

@@ -20,7 +20,7 @@ from src.cli.commands import (
 )
 from src.core.errors import TranslationPipelineError
 from src.core.pipeline import TranslationPipeline
-from src.core.types import DocumentContext, SegmentBundle, TranslationResult
+from src.core.types import ApiUsageSummary, DocumentContext, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
 from src.parser.ast_mapper import AstMapper
 from src.parser.markdown_parser import MarkdownParser
@@ -41,6 +41,11 @@ Paragraph with `code` and [link](https://example.com).
 class FakeProvider:
     def __init__(self) -> None:
         self.calls: list[str] = []
+
+    def get_usage_summary(self):
+        from src.core.types import ApiUsageSummary
+
+        return ApiUsageSummary()
 
     def chat_json(self, system_prompt: str, user_prompt: str, call_label: str = "llm"):
         del system_prompt
@@ -183,12 +188,14 @@ class AstAndPipelineTests(unittest.TestCase):
             self.config.execution.max_parallel_translations = 1
 
             class FakePipeline:
-                def run(self, input_path, target_lang, write_output=True, output_path=None):
+                def run(self, input_path, target_lang, write_output=True, output_path=None, bundle_executor=None, bundle_progress_callback=None):
                     self.last_call = (input_path, target_lang, write_output, output_path)
+                    if bundle_progress_callback is not None:
+                        bundle_progress_callback(input_path, target_lang, "bundle-0")
                     if write_output and output_path is not None:
                         output_path.parent.mkdir(parents=True, exist_ok=True)
                         output_path.write_text("[ZH] translated", encoding="utf-8")
-                    return SimpleNamespace(output_path=output_path, report={})
+                    return SimpleNamespace(output_path=output_path, report={}, api_usage=ApiUsageSummary())
 
             with patch("src.cli.commands.build_pipeline", return_value=FakePipeline()):
                 translate_command([str(input_root)], ["zh-CN"], self.config, match_pattern="*.md")
@@ -205,14 +212,12 @@ class AstAndPipelineTests(unittest.TestCase):
             segments=segments,
             summary_before="",
             summary_after="",
-            glossary_terms={},
             style_instructions=[],
         )
         context = DocumentContext(
             title="",
             abstract="",
             section_summaries={},
-            glossary={},
             style_guide=[],
             audience="",
         )
