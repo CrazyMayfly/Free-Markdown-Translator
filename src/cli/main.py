@@ -135,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="Model name. Defaults to config.yaml provider.model.")
     parser.add_argument("--eval", action="store_true", help="Translate without writing output, then run LLM-as-judge quality evaluation and print the judge report.")
     parser.add_argument("--resume", action="store_true", help="Resume an interrupted job: bundles already translated in a previous run are reused from the checkpoint (stored under <output>/.mdtx-state).")
+    parser.add_argument("--serve", action="store_true", help="Run as an MCP server on stdio so AI clients (ZCode/Claude Desktop/Cursor) can call mdtx as a tool. Requires the mdtx[mcp] extra.")
     return parser
 
 
@@ -143,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     configure_logging(logging.DEBUG if args.verbose else logging.INFO)
     try:
+        if args.serve:
+            from src.mcp_server.server import serve
+
+            serve()
+            return 0
         if args.init_config:
             config_path = initialize_config(args.config, force=args.force_init_config)
             print(f"Config ready: {config_path}")

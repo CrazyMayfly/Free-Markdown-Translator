@@ -29,18 +29,26 @@ from src.validators.markdown_validator import MarkdownValidator
 
 
 def _build_provider(config: TranslatorConfig):
-    if config.provider.name == "openai":
-        return AsyncOpenAIProvider(
-            base_url=config.provider.base_url,
-            api_key=config.provider.api_key,
-            api_key_env=config.provider.api_key_env,
-            model=config.provider.model,
-            temperature=config.provider.temperature,
-            max_tokens=config.provider.max_tokens,
-            structured_outputs=config.provider.structured_outputs,
-            max_retries=config.provider.max_retries,
+    # Any provider name is accepted: every endpoint speaks the OpenAI-compatible
+    # chat API and is selected purely by base_url (OpenAI, OpenRouter, DeepSeek,
+    # Ollama, vLLM, ...).
+    if config.provider.name != "openai":
+        logging.info(
+            "Provider %s: using OpenAI-compatible endpoint %s (model=%s)",
+            config.provider.name,
+            config.provider.base_url,
+            config.provider.model,
         )
-    raise ValueError(f"Provider {config.provider.name} is not implemented.")
+    return AsyncOpenAIProvider(
+        base_url=config.provider.base_url,
+        api_key=config.provider.api_key,
+        api_key_env=config.provider.api_key_env,
+        model=config.provider.model,
+        temperature=config.provider.temperature,
+        max_tokens=config.provider.max_tokens,
+        structured_outputs=config.provider.structured_outputs,
+        max_retries=config.provider.max_retries,
+    )
 
 
 def build_pipeline(config: TranslatorConfig, memory: object | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
