@@ -178,9 +178,9 @@ mdtx --serve
 
 | 平台 | 产物 |
 |------|------|
-| macOS (Apple Silicon) | `mdtx_0.1.0_aarch64.dmg`（未签名，首次打开需右键 → 打开） |
-| Windows x64 | `mdtx_0.1.0_x64-setup.exe` |
-| Ubuntu/Debian | `mdtx_0.1.0_amd64.deb` |
+| macOS (Apple Silicon) | `mdtx_3.0.0_aarch64.dmg`（未签名，首次打开需右键 → 打开） |
+| Windows x64 | `mdtx_3.0.0_x64-setup.exe` |
+| Ubuntu/Debian | `mdtx_3.0.0_amd64.deb`（另有通用 `AppImage`） |
 
 首次启动后在「配置」页填入 base_url / API Key / 模型（可用「测试连接」验证），即可开始翻译。
 

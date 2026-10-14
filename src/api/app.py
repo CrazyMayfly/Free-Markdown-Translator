@@ -135,7 +135,7 @@ class RevealBody(BaseModel):
 
 
 def create_app(memory: object | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
-    app = FastAPI(title="mdtx", version="0.1.0")
+    app = FastAPI(title="mdtx", version="3.0.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "tauri://localhost"],

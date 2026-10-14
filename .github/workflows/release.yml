@@ -150,4 +150,4 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.AppImage
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body_path: .github/release-body.md
