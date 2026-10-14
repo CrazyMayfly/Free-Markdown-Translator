@@ -93,7 +93,9 @@ class JobManager:
             config.style.tone = params.tone
         if params.model:
             config.provider.model = params.model
-        output_dir = Path(params.output_dir or config.output.directory).expanduser()
+        # Absolute so result paths stay meaningful regardless of the API
+        # process cwd (the desktop sidecar runs from the user's home).
+        output_dir = Path(params.output_dir or config.output.directory).expanduser().resolve()
         pairs: list[tuple[Path, str]] = []
         for raw_path in params.paths:
             input_path = Path(raw_path).expanduser()
@@ -170,9 +172,23 @@ class JobManager:
         pipeline = build_pipeline(config, memory=self._memory, checkpoint_store=checkpoint_store)
         total_bundles = pipeline.count_bundles(input_path, target_lang)
         done = {"count": 0}
+        pair_base = dict(job.usage)  # usage accumulated by earlier pairs
+
+        def _absorb_pair_usage() -> None:
+            """Fold the pair pipeline's live provider counters into job totals."""
+            provider = getattr(getattr(pipeline, "translator_agent", None), "provider", None)
+            if provider is None:
+                return
+            totals = provider.get_usage_summary().total
+            job.usage["prompt"] = pair_base["prompt"] + totals.prompt_tokens
+            job.usage["completion"] = pair_base["completion"] + totals.completion_tokens
+            job.usage["total"] = pair_base["total"] + totals.total_tokens
+            job.usage["cached"] = pair_base["cached"] + totals.cached_tokens
+            job.usage["calls"] = pair_base["calls"] + totals.call_count
 
         def on_bundle(path: Path, lang: str, bundle_id: str) -> None:
             done["count"] += 1
+            _absorb_pair_usage()  # track tokens even if a later step fails
             job.emit(
                 "progress",
                 input=str(input_path),
@@ -180,6 +196,7 @@ class JobManager:
                 bundle_id=bundle_id,
                 done=done["count"],
                 total=total_bundles,
+                usage=dict(job.usage),
             )
 
         source = TranslationSource(input_path=input_path, relative_output_path=_resolve_relative_output_path(input_path))
@@ -193,12 +210,7 @@ class JobManager:
             bundle_progress_callback=on_bundle,
         )
 
-        pair_usage = result.api_usage.total
-        job.usage["prompt"] += pair_usage.prompt_tokens
-        job.usage["completion"] += pair_usage.completion_tokens
-        job.usage["total"] += pair_usage.total_tokens
-        job.usage["cached"] += pair_usage.cached_tokens
-        job.usage["calls"] += pair_usage.call_count
+        _absorb_pair_usage()
 
         judge_report = None
         if job.params.evaluate:
@@ -211,7 +223,13 @@ class JobManager:
 
         serialized = _serialize_result(result, target_lang, judge_report)
         job.results.append(serialized)
-        job.emit("pair_done", input=str(input_path), lang=target_lang, index=index, usage=serialized["usage"])
+        job.emit(
+            "pair_done",
+            input=str(input_path),
+            lang=target_lang,
+            index=index,
+            usage=dict(job.usage),
+        )
 
 
 def _serialize_result(result, target_lang: str, judge_report: dict | None) -> dict[str, Any]:

@@ -15,7 +15,7 @@ const connected = ref(false);
 const finished = ref(false);
 const currentPair = ref("");
 const pairProgress = ref({ done: 0, total: 0 });
-const pairLog = ref<{ input: string; lang: string; done: number; total: number }[]>([]);
+const pairLog = ref<{ key: string; input: string; lang: string; done: number; total: number }[]>([]);
 const usage = ref({ prompt: 0, completion: 0, total: 0, cached: 0, calls: 0 });
 
 const statusMeta = computed(() => {
@@ -50,23 +50,27 @@ function fileName(path: string) {
 function onEvent(event: JobEvent) {
   events.value.push(event);
   if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
+  if (event.usage) {
+    // Backend sends cumulative snapshots; just adopt them (no double count).
+    usage.value = { ...event.usage };
+  }
   if (event.type === "progress") {
     currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;
     pairProgress.value = { done: event.done ?? 0, total: event.total ?? 0 };
+    const key = `${event.input}|${event.lang}`;
     const last = pairLog.value[pairLog.value.length - 1];
-    if (last && last.input === event.input && last.lang === event.lang) {
+    if (last && last.key === key) {
       last.done = event.done ?? 0;
       last.total = event.total ?? 0;
     } else {
-      pairLog.value.push({ input: fileName(event.input ?? ""), lang: event.lang ?? "", done: event.done ?? 0, total: event.total ?? 0 });
+      pairLog.value.push({
+        key,
+        input: fileName(event.input ?? ""),
+        lang: event.lang ?? "",
+        done: event.done ?? 0,
+        total: event.total ?? 0,
+      });
     }
-  }
-  if (event.type === "pair_done" && event.usage) {
-    usage.value.prompt += event.usage.prompt ?? 0;
-    usage.value.completion += event.usage.completion ?? 0;
-    usage.value.total += event.usage.total ?? 0;
-    usage.value.cached += event.usage.cached ?? 0;
-    usage.value.calls += 1;
   }
   if (event.type === "status") {
     if (summary.value) summary.value.status = event.status ?? summary.value.status;

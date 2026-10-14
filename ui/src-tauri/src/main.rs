@@ -67,6 +67,11 @@ fn sidecar_command(port: u16) -> Result<Command, String> {
             "--parent-pid",
             &std::process::id().to_string(),
         ]);
+        // GUI apps start with cwd=/ (read-only); run the sidecar from the
+        // user's home so relative config paths (output dir, memory db)
+        // resolve somewhere writable.
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        command.current_dir(home);
         Ok(command)
     }
 }

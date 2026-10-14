@@ -287,6 +287,7 @@ onUnmounted(() => unlistenDrop?.());
         <label class="form-control">
           <span class="label-text pb-1">输出目录</span>
           <input v-model="outputDir" class="input input-bordered input-sm font-mono" placeholder="output" />
+          <span class="label-text mt-1 text-xs text-base-content/50">相对路径将解析到用户主目录（如 ~/output）</span>
         </label>
         <label class="label cursor-pointer justify-start gap-3">
           <input v-model="evaluate" type="checkbox" class="toggle toggle-sm" />
