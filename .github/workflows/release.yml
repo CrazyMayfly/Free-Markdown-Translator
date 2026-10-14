@@ -142,9 +142,12 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          # download-artifact keeps the bundle subdirectories (dmg/, nsis/,
+          # deb/, appimage/), so match recursively.
           files: |
-            artifacts/*.dmg
-            artifacts/*.exe
-            artifacts/*.deb
-            artifacts/*.AppImage
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+          fail_on_unmatched_files: true
           generate_release_notes: true
