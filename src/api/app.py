@@ -17,7 +17,9 @@ import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
+from src.api.history import JobHistory, rerender_markdown
 from src.api.jobs import TERMINAL_STATUSES, JobManager, JobParams
 from src.infra.config import (
     TranslatorConfig,
@@ -114,7 +116,25 @@ def _config_file_path() -> Path:
     return resolved if resolved is not None else default_user_config_path()
 
 
-def create_app(memory: object | None = None, config_loader=None) -> FastAPI:
+class SegmentEditBody(BaseModel):
+    text: str
+
+
+class SaveResultBody(BaseModel):
+    path: str | None = None
+
+
+class ConfigTestBody(BaseModel):
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+
+
+class RevealBody(BaseModel):
+    path: str
+
+
+def create_app(memory: object | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
     app = FastAPI(title="mdtx", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -123,7 +143,8 @@ def create_app(memory: object | None = None, config_loader=None) -> FastAPI:
         allow_headers=["*"],
     )
     app.state.memory = memory
-    app.state.jobs = JobManager(memory=memory, config_loader=config_loader)
+    app.state.history = history
+    app.state.jobs = JobManager(memory=memory, config_loader=config_loader, history=history)
 
     config_router = APIRouter(prefix="/api")
 
@@ -195,9 +216,74 @@ def create_app(memory: object | None = None, config_loader=None) -> FastAPI:
     @jobs_router.get("/{job_id}")
     def get_job(job_id: str) -> dict[str, Any]:
         job = app.state.jobs.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
-        return {**job.summary(), "results": job.results}
+        if job is not None:
+            return {**job.summary(), "params": job.params.model_dump(), "results": job.results}
+        if app.state.history is not None:
+            record = app.state.history.get(job_id)
+            if record is not None:
+                return record
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
+
+    @jobs_router.put("/{job_id}/results/{result_index}/segments/{segment_id}")
+    def edit_segment(job_id: str, result_index: int, segment_id: str, body: SegmentEditBody) -> dict[str, Any]:
+        job = app.state.jobs.get(job_id)
+        if job is not None and 0 <= result_index < len(job.results):
+            result = job.results[result_index]
+            target = next((seg for seg in result.get("segments", []) if seg.get("segment_id") == segment_id), None)
+            if target is None:
+                raise HTTPException(status_code=404, detail=f"Unknown segment: {segment_id}")
+            result["translated_markdown"] = rerender_markdown(
+                result.get("translated_markdown") or "", result["segments"], {segment_id: body.text}
+            )
+            target["translated"] = body.text
+            if app.state.history is not None:
+                try:
+                    app.state.history.save(job.summary(), job.results)
+                except Exception:
+                    logging.exception("Failed to persist edited job %s", job_id)
+            return {"result": result}
+        if app.state.history is not None:
+            try:
+                result = app.state.history.update_segment(job_id, result_index, segment_id, body.text)
+            except KeyError:
+                pass
+            except IndexError:
+                raise HTTPException(status_code=404, detail=f"Result index out of range: {result_index}") from None
+            else:
+                return {"result": result}
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
+
+    @jobs_router.post("/{job_id}/results/{result_index}/save")
+    def save_result(job_id: str, result_index: int, body: SaveResultBody) -> dict[str, Any]:
+        def fallback_path(result: dict[str, Any]) -> Path:
+            input_path = Path(result.get("input_path", "document.md"))
+            return Path.home() / "output" / f"{input_path.stem}.{result.get('target_lang', 'translated').lower()}.md"
+
+        def write_markdown(result: dict[str, Any]) -> Path:
+            markdown = result.get("translated_markdown") or ""
+            if not markdown:
+                raise HTTPException(status_code=409, detail="Result has no translated markdown to save")
+            target = Path(body.path).expanduser() if body.path else (
+                Path(result["output_path"]).expanduser() if result.get("output_path") else fallback_path(result)
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(markdown, encoding="utf-8")
+            return target
+
+        job = app.state.jobs.get(job_id)
+        if job is not None:
+            if not (0 <= result_index < len(job.results)):
+                raise HTTPException(status_code=404, detail=f"Result index out of range: {result_index}")
+            path = write_markdown(job.results[result_index])
+            return {"path": str(path)}
+        if app.state.history is not None:
+            record = app.state.history.get(job_id)
+            if record is not None:
+                if not (0 <= result_index < len(record["results"])):
+                    raise HTTPException(status_code=404, detail=f"Result index out of range: {result_index}")
+                path = write_markdown(record["results"][result_index])
+                return {"path": str(path)}
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}")
 
     @jobs_router.post("/{job_id}/cancel")
     async def cancel_job(job_id: str) -> dict[str, Any]:
@@ -230,6 +316,80 @@ def create_app(memory: object | None = None, config_loader=None) -> FastAPI:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @misc_router.get("/history")
+    def history_list() -> list[dict[str, Any]]:
+        if app.state.history is None:
+            return []
+        return app.state.history.list()
+
+    @misc_router.delete("/history/{job_id}")
+    def history_delete(job_id: str) -> dict[str, Any]:
+        if app.state.history is None or not app.state.history.delete(job_id):
+            raise HTTPException(status_code=404, detail=f"Unknown history job: {job_id}")
+        return {"id": job_id, "deleted": True}
+
+    @config_router.post("/config/test")
+    def test_config(body: ConfigTestBody) -> dict[str, Any]:
+        import time as _time
+
+        import httpx
+
+        config = (config_loader or load_config)()
+        base_url = (body.base_url or config.provider.base_url or "").rstrip("/")
+        api_key = body.api_key
+        if api_key in (None, "", API_KEY_MASK):
+            api_key = config.provider.api_key
+        model = body.model or config.provider.model
+        if not base_url:
+            raise HTTPException(status_code=400, detail="base_url is not configured")
+
+        started = _time.monotonic()
+        try:
+            response = httpx.get(
+                f"{base_url}/models",
+                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+                timeout=8.0,
+            )
+        except httpx.HTTPError as exc:
+            return {"ok": False, "base_url": base_url, "latency_ms": None, "error": f"连接失败: {exc}"}
+        latency_ms = int((_time.monotonic() - started) * 1000)
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "base_url": base_url,
+                "latency_ms": latency_ms,
+                "error": f"HTTP {response.status_code}: {response.text[:200]}",
+            }
+        try:
+            model_ids = [item.get("id") for item in response.json().get("data", [])]
+        except ValueError:
+            model_ids = []
+        has_model = bool(model) and (not model_ids or model in model_ids)
+        return {
+            "ok": has_model,
+            "base_url": base_url,
+            "latency_ms": latency_ms,
+            "models": model_ids,
+            "error": None if has_model else f"模型 {model} 不在可用列表中",
+        }
+
+    @misc_router.post("/fs/reveal")
+    def reveal_path(body: RevealBody) -> dict[str, Any]:
+        import subprocess
+        import sys
+
+        target = Path(body.path).expanduser()
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"Path does not exist: {target}")
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target.parent if target.is_file() else target)])
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"无法打开访达: {exc}") from exc
+        return {"revealed": str(target)}
 
     @misc_router.get("/memory/stats")
     def memory_stats() -> dict[str, Any]:
@@ -289,4 +449,4 @@ def run_server(port: int, open_browser: bool = True) -> None:
             webbrowser.open(url)
         except Exception:  # pragma: no cover - best effort
             pass
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(create_app(history=JobHistory()), host="127.0.0.1", port=port, log_level="warning")

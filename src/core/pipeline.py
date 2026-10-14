@@ -9,7 +9,7 @@ from pathlib import Path
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
-from src.core.errors import TranslationPipelineError
+from src.core.errors import OutputWriteError, TranslationPipelineError
 from src.core.orchestrator import Orchestrator
 from src.core.types import PipelineResult, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
@@ -133,8 +133,20 @@ class TranslationPipeline:
 
         final_output_path = output_path or self._build_output_path(input_path, target_lang)
         if write_output:
-            final_output_path.parent.mkdir(parents=True, exist_ok=True)
-            final_output_path.write_text(output_text, encoding="utf-8")
+            try:
+                final_output_path.parent.mkdir(parents=True, exist_ok=True)
+                final_output_path.write_text(output_text, encoding="utf-8")
+            except OSError as exc:
+                # The translation itself succeeded; let callers salvage the
+                # text instead of losing the whole run over a bad path.
+                raise OutputWriteError(
+                    f"写入输出文件失败: {exc}",
+                    output_text=output_text,
+                    output_path=final_output_path,
+                    validation=validation,
+                    segments=segments,
+                    translations=all_translations,
+                ) from exc
             log_success("Saved markdown: %s", final_output_path)
 
         if self.checkpoint_store is not None and validation.passed:

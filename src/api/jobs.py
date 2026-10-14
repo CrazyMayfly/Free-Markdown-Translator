@@ -15,11 +15,14 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic import BaseModel
 
 from src.cli.commands import TranslationSource, _build_provider, _build_task_output_path, _resolve_relative_output_path, build_pipeline
+from src.core.errors import OutputWriteError
+from src.core.types import ApiUsageSummary
 from src.infra.config import TranslatorConfig, load_config
 from src.memory.checkpoint import JobCheckpointStore
 
@@ -72,10 +75,16 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, memory: object | None = None, config_loader: Callable[[], TranslatorConfig] | None = None) -> None:
+    def __init__(
+        self,
+        memory: object | None = None,
+        config_loader: Callable[[], TranslatorConfig] | None = None,
+        history: object | None = None,
+    ) -> None:
         self._jobs: dict[str, Job] = {}
         self._memory = memory
         self._config_loader = config_loader or load_config
+        self._history = history
 
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
@@ -156,6 +165,12 @@ class JobManager:
             job.emit("status", status="failed", error=str(exc))
         finally:
             job.finished_at = time.time()
+            if self._history is not None:
+                try:
+                    summary = {**job.summary(), "params": job.params.model_dump()}
+                    self._history.save(summary, job.results)
+                except Exception:
+                    logging.exception("Failed to persist job %s to history", job.id)
 
     async def _run_pair(
         self,
@@ -202,13 +217,33 @@ class JobManager:
         source = TranslationSource(input_path=input_path, relative_output_path=_resolve_relative_output_path(input_path))
         output_path = _build_task_output_path(source, target_lang, output_dir, config)
         job.emit("pair_start", input=str(input_path), lang=target_lang, index=index, bundles=total_bundles)
-        result = await pipeline.run_async(
-            input_path,
-            target_lang,
-            write_output=True,
-            output_path=output_path,
-            bundle_progress_callback=on_bundle,
-        )
+        write_error: str | None = None
+        try:
+            result = await pipeline.run_async(
+                input_path,
+                target_lang,
+                write_output=True,
+                output_path=output_path,
+                bundle_progress_callback=on_bundle,
+            )
+        except OutputWriteError as exc:
+            # Translation succeeded; only the file write failed. Surface the
+            # text instead of losing the run.
+            _absorb_pair_usage()
+            logging.warning("Output write failed for %s: %s", input_path.name, exc)
+            write_error = str(exc)
+            provider = getattr(getattr(pipeline, "translator_agent", None), "provider", None)
+            result = SimpleNamespace(
+                input_path=input_path,
+                output_path=None,
+                translated_text=exc.output_text,
+                segments=exc.segments,
+                translations=exc.translations,
+                validation=exc.validation,
+                api_usage=provider.get_usage_summary() if provider is not None else ApiUsageSummary(),
+                report={},
+                context=None,
+            )
 
         _absorb_pair_usage()
 
@@ -222,6 +257,7 @@ class JobManager:
                 judge_report = {"error": str(exc)}
 
         serialized = _serialize_result(result, target_lang, judge_report)
+        serialized["write_error"] = write_error
         job.results.append(serialized)
         job.emit(
             "pair_done",
@@ -229,6 +265,7 @@ class JobManager:
             lang=target_lang,
             index=index,
             usage=dict(job.usage),
+            write_error=write_error,
         )
 
 

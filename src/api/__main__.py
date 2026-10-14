@@ -41,8 +41,14 @@ def main() -> None:
     import uvicorn
 
     from src.api.app import create_app
+    from src.api.history import JobHistory
 
-    uvicorn.run(create_app(), host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(
+        create_app(history=JobHistory()),
+        host="127.0.0.1",
+        port=args.port,
+        log_level="warning",
+    )
 
 
 if __name__ == "__main__":
