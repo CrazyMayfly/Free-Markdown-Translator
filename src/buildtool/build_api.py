@@ -9,9 +9,7 @@ Tauri's externalBin expects ("binaries/mdtx-api" in tauri.conf.json).
 
 from __future__ import annotations
 
-import argparse
 import platform
-import shutil
 import subprocess
 import sys
 import tempfile

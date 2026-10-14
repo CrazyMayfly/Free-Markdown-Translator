@@ -168,6 +168,27 @@ mdtx --serve
 - `translate_markdown(path, target_langs, mode?, tone?, model?, write?)`：翻译 Markdown 文件，返回各语言的译文、校验结果与 token 用量，翻译进度通过 MCP 进度通知上报
 - `evaluate_translation(path, target_lang)`：翻译并用 LLM-as-judge 打分（准确度/流畅度/术语/格式）
 
+## 🖥️ 桌面 UI（Tauri + Vue3）
+
+`mdtx` 附带一个本地桌面工作台：文件浏览选择、实时翻译进度（SSE）、双栏译文对照、LLM 质量评分、配置管理、翻译记忆管理。架构是 Tauri 2 壳 + Vue3 前端 + Python FastAPI sidecar（复用完整翻译管线），仅监听 `127.0.0.1`。
+
+开发模式（三种，按需选择）：
+
+```bash
+# 1. 纯浏览器开发：终端 1 起 API，终端 2 起 vite（vite 代理 /api → 8000）
+mdtx --ui-port 8000
+cd ui && npm install && npm run dev     # 打开 http://localhost:5173
+
+# 2. Tauri 桌面窗口（自动带起 vite 与 Python API）
+cd ui && npx tauri dev
+
+# 3. 正式打包（.app / .dmg，内嵌 PyInstaller sidecar）
+.venv/bin/python src/buildtool/build_api.py   # 先构建 mdtx-api sidecar
+cd ui && npx tauri build
+```
+
+环境要求：Node ≥18（nvm 安装即可）、Rust stable（rustup）、Python 依赖 `pip install -e ".[ui]"`。
+
 ## 🔌 兼容的模型服务
 
 任何 OpenAI 兼容的 chat 接口都可以通过 `base_url` 接入：
@@ -306,6 +327,7 @@ provider:
 ```text
 src/
 ├─ agents/        Agent 定义与提示词，负责翻译、审校、评估、格式保护
+├─ api/           FastAPI 服务层：任务管理、SSE 进度、配置/记忆路由（UI 后端）
 ├─ cli/           命令行入口与参数处理
 ├─ core/          流水线、任务编排、核心数据结构
 ├─ infra/         配置加载与日志基础设施
@@ -314,7 +336,8 @@ src/
 ├─ memory/        文档上下文、翻译记忆、断点续传
 ├─ parser/        Markdown 解析、AST 映射、渲染、分段
 ├─ validators/    front matter 与结构校验
-└─ buildtool/     Windows exe 打包脚本与资源
+├─ buildtool/     打包脚本（Windows exe / macOS sidecar）与资源
+└─ ui 的 Tauri+Vue 工程位于 ui/（前端 ui/src、桌面壳 ui/src-tauri）
 ```
 
 ## Star History
