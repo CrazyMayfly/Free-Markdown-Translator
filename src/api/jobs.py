@@ -97,10 +97,22 @@ class JobManager:
         pairs: list[tuple[Path, str]] = []
         for raw_path in params.paths:
             input_path = Path(raw_path).expanduser()
-            if not input_path.is_file():
-                raise FileNotFoundError(f"Input file does not exist: {input_path}")
-            for lang in params.target_langs:
-                pairs.append((input_path, lang))
+            if input_path.is_dir():
+                matched = sorted(
+                    candidate
+                    for candidate in input_path.rglob(config.input.file_pattern)
+                    if candidate.is_file()
+                )
+                if not matched:
+                    raise ValueError(f"No files matched {config.input.file_pattern} under {input_path}")
+                files: list[Path] = matched
+            elif input_path.is_file():
+                files = [input_path]
+            else:
+                raise FileNotFoundError(f"Input path does not exist: {input_path}")
+            for file_path in files:
+                for lang in params.target_langs:
+                    pairs.append((file_path, lang))
         job = Job(id=uuid.uuid4().hex[:12], params=params, config=config, pairs=pairs)
         self._jobs[job.id] = job
         job.task = asyncio.create_task(self._execute(job, config, output_dir), name=f"mdtx-job-{job.id}")
