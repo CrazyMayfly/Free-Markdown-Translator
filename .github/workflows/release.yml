@@ -66,7 +66,23 @@ jobs:
 
       - name: Build Tauri app
         working-directory: ui
-        run: npx tauri build --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tauri build --target ${{ matrix.target }} 2>&1 | tee build-log.txt
+
+      - name: Report build failure
+        if: failure()
+        working-directory: ui
+        shell: bash
+        run: |
+          # Anonymous visitors cannot read job logs; surface the error tail as
+          # check-run annotations so failures are diagnosable from the API.
+          tail -c 5000 build-log.txt | sed 's/%/%25/g' | awk '{printf "%s\\n", $0}' | head -c 3800 > /tmp/ann.txt
+          echo "::error title=tauri build tail::$(cat /tmp/ann.txt)"
+          grep -iE "^error|error\[|panicked|failed" build-log.txt | head -10 | while IFS= read -r line; do
+            echo "::error::${line:0:3000}"
+          done
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
