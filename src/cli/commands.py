@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.agents.format_guard_agent import FormatGuardAgent
+from src.agents.judge_agent import JudgeAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
 from src.core.pipeline import TranslationPipeline
@@ -411,3 +412,21 @@ def report_command(path: str, target_lang: str, config: TranslatorConfig) -> int
     result = pipeline.run(Path(path), target_lang, write_output=False)
     print(json.dumps(result.report, ensure_ascii=False, indent=2))
     return 0
+
+
+def evaluate_command(path: str, target_lang: str, config: TranslatorConfig) -> int:
+    """Translate one file and print an LLM-as-judge quality report."""
+    pipeline = build_pipeline(config)
+    result = pipeline.run(Path(path), target_lang, write_output=False)
+    judge = JudgeAgent(_build_provider(config))
+    judge_report = judge.evaluate(result.segments, result.translations, result.context, target_lang)
+    judge_report["input_path"] = str(path)
+    judge_report["validation_passed"] = result.validation.passed
+    judge_report["api_usage"] = {
+        "prompt_tokens": result.api_usage.total.prompt_tokens,
+        "completion_tokens": result.api_usage.total.completion_tokens,
+        "total_tokens": result.api_usage.total.total_tokens,
+        "calls": result.api_usage.total.call_count,
+    }
+    print(json.dumps(judge_report, ensure_ascii=False, indent=2))
+    return 0 if judge_report["overall"] >= 3.0 else 1

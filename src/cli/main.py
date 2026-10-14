@@ -10,7 +10,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.cli.commands import translate_command
+from src.cli.commands import evaluate_command, translate_command
 from src.cli.errors import present_cli_error
 from src.infra.config import TranslatorConfig, initialize_config, load_config, resolve_config_path
 from src.infra.logging import configure_logging
@@ -133,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--guard", nargs="?", const=True, default=None, type=_parse_bool_arg, help="Enable or disable format guard. Defaults to config.yaml pipeline.enable_format_guard.")
     parser.add_argument("--tone", help="Translation tone. Defaults to config.yaml style.tone.")
     parser.add_argument("--model", help="Model name. Defaults to config.yaml provider.model.")
+    parser.add_argument("--eval", action="store_true", help="Translate without writing output, then run LLM-as-judge quality evaluation and print the judge report.")
     return parser
 
 
@@ -149,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("the following arguments are required: paths")
         config = _apply_cli_overrides(args, load_config(args.config))
         _log_startup_config(args, config)
+        if args.eval:
+            exit_code = 0
+            for path in args.paths:
+                for target_lang in config.target_languages:
+                    result = evaluate_command(path, target_lang, config)
+                    exit_code = exit_code or result
+            return exit_code
         return translate_command(
             args.paths,
             config.target_languages,

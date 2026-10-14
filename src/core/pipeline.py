@@ -117,6 +117,7 @@ class TranslationPipeline:
             translations=all_translations,
             validation=validation,
             api_usage=self.translator_agent.provider.get_usage_summary(),
+            context=context,
         )
         result.report = self.report_builder.build(result)
         return result
@@ -143,6 +144,9 @@ class TranslationPipeline:
         if mode not in {"fast", "balanced", "strict"}:
             return "balanced"
         return mode
+
+    def _review_min_severity(self) -> str:
+        return "low" if self._normalized_mode() == "strict" else "high"
 
     def _should_run_review(self, bundle, translations: list[TranslationResult]) -> bool:
         if self.config.pipeline.enable_review:
@@ -286,7 +290,12 @@ class TranslationPipeline:
 
         if self._should_run_review(bundle, translations):
             logging.info("Reviewing %s (%s)", bundle.bundle_id, mode)
-            translations = self.reviewer_agent.review_bundle(bundle, translations, context)
+            translations = self.reviewer_agent.review_bundle(
+                bundle,
+                translations,
+                context,
+                min_severity=self._review_min_severity(),
+            )
         for item in translations:
             item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
         return translations

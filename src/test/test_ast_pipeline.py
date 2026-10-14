@@ -69,13 +69,22 @@ class FakeProvider:
                     for segment in payload["segments"]
                 ]
             }
-        if task in {"review", "format_guard"}:
+        if task == "reflect":
+            return {"issues": []}
+        if task == "judge":
+            return {
+                "scores": {"accuracy": 5.0, "fluency": 4.0, "terminology": 4.5, "format": 5.0},
+                "overall": 4.5,
+                "comments": [],
+            }
+        if task in {"review", "improve", "format_guard"}:
             items = payload["translations"]
+            prefix = "[IMPROVED]" if task == "improve" else ""
             return {
                 "translations": [
                     {
                         "segment_id": item["segment_id"],
-                        "translated_text": item["text"],
+                        "translated_text": f"{prefix}{item['text']}",
                         "notes": [],
                         "applied_terms": {},
                         "confidence": 0.99,
@@ -265,7 +274,8 @@ class AstAndPipelineTests(unittest.TestCase):
             pipeline.run(input_path, "zh-CN", write_output=False)
 
         self.assertEqual(self.provider.calls.count("translate"), 1)
-        self.assertEqual(self.provider.calls.count("review"), 1)
+        self.assertEqual(self.provider.calls.count("reflect"), 1)
+        self.assertEqual(self.provider.calls.count("improve"), 0)
 
 
 if __name__ == "__main__":

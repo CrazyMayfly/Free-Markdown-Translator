@@ -128,3 +128,4 @@ class PipelineResult:
     validation: ValidationReport
     api_usage: ApiUsageSummary = field(default_factory=ApiUsageSummary)
     report: dict[str, Any] = field(default_factory=dict)
+    context: DocumentContext | None = None
