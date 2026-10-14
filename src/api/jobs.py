@@ -151,18 +151,27 @@ class JobManager:
                 ),
             )
         try:
-            for index, (input_path, target_lang) in enumerate(job.pairs, start=1):
-                await self._run_pair(job, config, output_dir, checkpoint_store, input_path, target_lang, index)
+            # Pairs run concurrently; one shared semaphore caps global LLM
+            # concurrency at max_parallel_translations (same semantics as the
+            # CLI's _translate_pairs).
+            semaphore = asyncio.Semaphore(max(1, config.execution.max_parallel_translations))
+            async with asyncio.TaskGroup() as task_group:
+                for index, (input_path, target_lang) in enumerate(job.pairs, start=1):
+                    task_group.create_task(
+                        self._run_pair(job, config, output_dir, checkpoint_store, semaphore, input_path, target_lang, index)
+                    )
             job.status = "completed"
             job.emit("status", status="completed", results=job.results)
         except asyncio.CancelledError:
             job.status = "cancelled"
             job.emit("status", status="cancelled")
-        except Exception as exc:
+        except BaseExceptionGroup as exc:
+            # TaskGroup wraps child failures; surface the first real error.
+            first = next((item for item in exc.exceptions if not isinstance(item, asyncio.CancelledError)), None)
             logging.exception("Job %s failed", job.id)
             job.status = "failed"
-            job.error = str(exc)
-            job.emit("status", status="failed", error=str(exc))
+            job.error = str(first or exc)
+            job.emit("status", status="failed", error=str(first or exc))
         finally:
             job.finished_at = time.time()
             if self._history is not None:
@@ -178,6 +187,7 @@ class JobManager:
         config: TranslatorConfig,
         output_dir: Path,
         checkpoint_store: JobCheckpointStore | None,
+        semaphore: asyncio.Semaphore,
         input_path: Path,
         target_lang: str,
         index: int,
@@ -187,19 +197,35 @@ class JobManager:
         pipeline = build_pipeline(config, memory=self._memory, checkpoint_store=checkpoint_store)
         total_bundles = pipeline.count_bundles(input_path, target_lang)
         done = {"count": 0}
-        pair_base = dict(job.usage)  # usage accumulated by earlier pairs
+        last_totals = {"prompt": 0, "completion": 0, "total": 0, "cached": 0, "calls": 0}
 
         def _absorb_pair_usage() -> None:
-            """Fold the pair pipeline's live provider counters into job totals."""
+            """Fold new provider tokens into job totals as deltas.
+
+            Several pairs run concurrently, so absolute snapshots would clobber
+            each other; deltas computed in one event-loop turn are safe.
+            """
             provider = getattr(getattr(pipeline, "translator_agent", None), "provider", None)
             if provider is None:
                 return
             totals = provider.get_usage_summary().total
-            job.usage["prompt"] = pair_base["prompt"] + totals.prompt_tokens
-            job.usage["completion"] = pair_base["completion"] + totals.completion_tokens
-            job.usage["total"] = pair_base["total"] + totals.total_tokens
-            job.usage["cached"] = pair_base["cached"] + totals.cached_tokens
-            job.usage["calls"] = pair_base["calls"] + totals.call_count
+            deltas = {
+                "prompt": totals.prompt_tokens - last_totals["prompt"],
+                "completion": totals.completion_tokens - last_totals["completion"],
+                "total": totals.total_tokens - last_totals["total"],
+                "cached": totals.cached_tokens - last_totals["cached"],
+                "calls": totals.call_count - last_totals["calls"],
+            }
+            for key, delta in deltas.items():
+                if delta > 0:
+                    job.usage[key] += delta
+            last_totals.update(
+                prompt=totals.prompt_tokens,
+                completion=totals.completion_tokens,
+                total=totals.total_tokens,
+                cached=totals.cached_tokens,
+                calls=totals.call_count,
+            )
 
         def on_bundle(path: Path, lang: str, bundle_id: str) -> None:
             done["count"] += 1
@@ -224,6 +250,7 @@ class JobManager:
                 target_lang,
                 write_output=True,
                 output_path=output_path,
+                semaphore=semaphore,
                 bundle_progress_callback=on_bundle,
             )
         except OutputWriteError as exc:

@@ -139,6 +139,46 @@ class JobLifecycleTests(unittest.TestCase):
 
         self._run(scenario())
 
+    def test_pairs_run_in_parallel(self) -> None:
+        """Both pairs must start before either finishes (TaskGroup, not a for-loop)."""
+        async def scenario():
+            with tempfile.TemporaryDirectory() as temp_dir:
+                sample = _write_sample(temp_dir)
+                output_dir = Path(temp_dir) / "out"
+                pipeline = FakeUiPipeline(delay=0.3)
+                app, _ = _make_app(pipeline, str(output_dir))
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                    with patch("src.api.jobs.build_pipeline", return_value=pipeline):
+                        response = await client.post(
+                            "/api/jobs",
+                            json={"paths": [str(sample)], "target_langs": ["zh-CN", "en"], "output_dir": str(output_dir)},
+                        )
+                        job_id = response.json()["id"]
+                        for _ in range(200):
+                            detail = (await client.get(f"/api/jobs/{job_id}")).json()
+                            if detail["status"] in {"completed", "failed", "cancelled"}:
+                                break
+                            await asyncio.sleep(0.05)
+                        self.assertEqual(detail["status"], "completed")
+                        self.assertEqual(len(detail["results"]), 2)
+
+                        events = []
+                        async with client.stream("GET", f"/api/jobs/{job_id}/events") as stream_response:
+                            current_type = None
+                            async for line in stream_response.aiter_lines():
+                                if line.startswith("event: "):
+                                    current_type = line[len("event: "):]
+                                elif line.startswith("data: ") and current_type not in (None, "end"):
+                                    events.append({"type": current_type, **json.loads(line[len("data: "):])})
+                        starts = [i for i, event in enumerate(events) if event["type"] == "pair_start"]
+                        dones = [i for i, event in enumerate(events) if event["type"] == "pair_done"]
+                        self.assertEqual(len(starts), 2)
+                        self.assertEqual(len(dones), 2)
+                        self.assertLess(max(starts), min(dones), f"pairs did not interleave: {events}")
+
+        self._run(scenario())
+
     def test_cancel_running_job(self) -> None:
         async def scenario():
             with tempfile.TemporaryDirectory() as temp_dir:

@@ -35,11 +35,16 @@ const statusMeta = computed(() => {
 
 const percent = computed(() => {
   if (finished.value && summary.value?.status === "completed") return 100;
-  if (!pairProgress.value.total) return 0;
-  const pairWeight = summary.value?.pairs.length ? 1 / summary.value.pairs.length : 1;
-  const base = Math.max(0, pairLog.value.length - 1) * pairWeight;
-  return Math.min(99, Math.round((base + (pairProgress.value.done / pairProgress.value.total) * pairWeight) * 100));
+  const totalPairs = summary.value?.pairs.length ?? 0;
+  if (!pairLog.value.length || !totalPairs) return 0;
+  // Pairs run in parallel: sum each pair's own bundle ratio instead of
+  // counting completed pairs.
+  const sum = pairLog.value.reduce((acc, pair) => acc + (pair.total ? Math.min(1, pair.done / pair.total) : 0), 0);
+  return Math.min(99, Math.round((sum / totalPairs) * 100));
 });
+
+const donePairs = computed(() => pairLog.value.filter((pair) => pair.total && pair.done >= pair.total).length);
+const inFlightPairs = computed(() => pairLog.value.length - donePairs.value);
 
 const cacheShare = computed(() => {
   if (!usage.value.prompt) return 0;
@@ -182,7 +187,7 @@ onBeforeUnmount(() => {
           </div>
           <p class="text-sm text-base-content/70">{{ currentPair || "等待开始…" }}</p>
           <p class="text-xs text-base-content/50">
-            第 {{ pairLog.length }}/{{ summary?.pairs.length ?? "?" }} 个翻译对 ·
+            {{ donePairs }}/{{ summary?.pairs.length ?? "?" }} 对完成 · {{ inFlightPairs }} 对进行中 ·
             bundle {{ pairProgress.done }}/{{ pairProgress.total || "?" }}
           </p>
         </div>
