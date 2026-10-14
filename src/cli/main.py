@@ -136,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval", action="store_true", help="Translate without writing output, then run LLM-as-judge quality evaluation and print the judge report.")
     parser.add_argument("--resume", action="store_true", help="Resume an interrupted job: bundles already translated in a previous run are reused from the checkpoint (stored under <output>/.mdtx-state).")
     parser.add_argument("--serve", action="store_true", help="Run as an MCP server on stdio so AI clients (ZCode/Claude Desktop/Cursor) can call mdtx as a tool. Requires the mdtx[mcp] extra.")
+    parser.add_argument("--ui-port", type=_parse_positive_int, default=None, help="Serve the local web UI on 127.0.0.1:<port> (mdtx[ui] extra).")
     return parser
 
 
@@ -144,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     configure_logging(logging.DEBUG if args.verbose else logging.INFO)
     try:
+        if args.ui_port is not None:
+            from src.api.app import run_server
+
+            run_server(args.ui_port)
+            return 0
         if args.serve:
             from src.mcp_server.server import serve
 

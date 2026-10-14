@@ -38,6 +38,10 @@ dev = [
 mcp = [
     "mcp>=1.2.0",
 ]
+ui = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
 
 [project.scripts]
 mdtx = "src.cli.main:main"

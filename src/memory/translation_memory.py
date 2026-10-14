@@ -88,6 +88,20 @@ class TranslationMemory:
     def stats(self) -> dict[str, int]:
         return {"hits": self.hits, "misses": self.misses}
 
+    def entry_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM translation_entries").fetchone()
+        return int(row[0])
+
+    def clear_all(self) -> int:
+        with self._lock:
+            removed = self._conn.execute("SELECT COUNT(*) FROM translation_entries").fetchone()[0]
+            self._conn.execute("DELETE FROM translation_entries")
+            self._conn.commit()
+        self.hits = 0
+        self.misses = 0
+        return int(removed)
+
 
 class NullMemory:
     """Drop-in replacement used when memory is disabled."""
@@ -100,6 +114,12 @@ class NullMemory:
 
     def stats(self) -> dict[str, int]:
         return {"hits": 0, "misses": 0}
+
+    def entry_count(self) -> int:
+        return 0
+
+    def clear_all(self) -> int:
+        return 0
 
 
 def build_memory(config) -> object:
