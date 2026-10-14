@@ -273,15 +273,16 @@ def _get_memory(app: FastAPI):
     return app.state.memory
 
 
-def run_server(port: int) -> None:
-    import webbrowser
-
+def run_server(port: int, open_browser: bool = True) -> None:
     import uvicorn
 
-    url = f"http://127.0.0.1:{port}"
-    logging.info("mdtx UI listening on %s", url)
-    try:
-        webbrowser.open(url)
-    except Exception:  # pragma: no cover - best effort
-        pass
+    if open_browser:
+        import webbrowser
+
+        url = f"http://127.0.0.1:{port}"
+        logging.info("mdtx UI listening on %s", url)
+        try:
+            webbrowser.open(url)
+        except Exception:  # pragma: no cover - best effort
+            pass
     uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")

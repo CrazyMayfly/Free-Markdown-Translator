@@ -1,5 +1,14 @@
-// API base: empty in dev (vite proxy), injected by Tauri in production.
-export const API_BASE = window.__MDTX_API_BASE__ ?? "";
+// API base: empty in dev (vite proxy), set from the Tauri `api-ready` event
+// in production via setApiBase().
+let apiBase = window.__MDTX_API_BASE__ ?? "";
+
+export function setApiBase(base: string): void {
+  apiBase = base.replace(/\/$/, "");
+}
+
+export function getApiBase(): string {
+  return apiBase;
+}
 
 export interface AppConfig {
   target_languages: string[];
@@ -92,7 +101,7 @@ export interface FsEntry {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const response = await fetch(`${apiBase}${path}`, init);
   if (!response.ok) {
     let detail = `${response.status}`;
     try {
@@ -135,5 +144,5 @@ export const api = {
 };
 
 export function jobEventsUrl(id: string, last = 0): string {
-  return `${API_BASE}/api/jobs/${id}/events?last=${last}`;
+  return `${apiBase}/api/jobs/${id}/events?last=${last}`;
 }

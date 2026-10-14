@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the main window: core events for api-ready handshake.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
