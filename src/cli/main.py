@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import copy
-import os
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -134,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tone", help="Translation tone. Defaults to config.yaml style.tone.")
     parser.add_argument("--model", help="Model name. Defaults to config.yaml provider.model.")
     parser.add_argument("--eval", action="store_true", help="Translate without writing output, then run LLM-as-judge quality evaluation and print the judge report.")
+    parser.add_argument("--resume", action="store_true", help="Resume an interrupted job: bundles already translated in a previous run are reused from the checkpoint (stored under <output>/.mdtx-state).")
     return parser
 
 
@@ -163,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             output_dir=config.output.directory,
             match_pattern=config.input.file_pattern,
+            resume=args.resume,
         )
     except KeyboardInterrupt:
         print("Translation cancelled by user.", file=sys.stderr)

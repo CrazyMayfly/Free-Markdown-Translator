@@ -8,13 +8,13 @@ from unittest.mock import patch
 import yaml
 
 from src.infra.config import (
+    TranslatorConfig,
     _default_config_dict,
     default_user_config_path,
     initialize_config,
     load_config,
     render_default_config_yaml,
     resolve_config_path,
-    TranslatorConfig,
 )
 
 

@@ -10,7 +10,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.infra.config import render_default_config_yaml
 
-
 BUILD_ROOT = Path(__file__).resolve().parent
 OUT_DIR = BUILD_ROOT / "out"
 WORK_DIR = BUILD_ROOT / "work"

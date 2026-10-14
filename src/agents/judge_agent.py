@@ -29,15 +29,43 @@ class JudgeAgent:
     ) -> dict:
         if self.provider is None:
             raise ValueError("JudgeAgent requires an LLM provider.")
+        payload = self._call(segments, translations, context, target_lang, reference)
+        return self._parse(payload, target_lang)
+
+    async def evaluate_async(
+        self,
+        segments: list[Segment],
+        translations: list[TranslationResult],
+        context: DocumentContext | None,
+        target_lang: str,
+        reference: dict[str, str] | None = None,
+    ) -> dict:
+        if self.provider is None:
+            raise ValueError("JudgeAgent requires an LLM provider.")
         if context is None:
             context = DocumentContext(title="", abstract="", section_summaries={}, style_guide=[], audience="")
         system_prompt, user_prompt = build_judge_prompts(context, target_lang, segments, translations, reference)
-        payload = self.provider.chat_json(
+        payload = await self.provider.chat_json_async(
             system_prompt,
             user_prompt,
             call_label="judge",
             response_schema=JUDGE_RESPONSE_SCHEMA,
         )
+        return self._parse(payload, target_lang)
+
+    def _call(self, segments, translations, context, target_lang, reference) -> dict:
+        if context is None:
+            context = DocumentContext(title="", abstract="", section_summaries={}, style_guide=[], audience="")
+        system_prompt, user_prompt = build_judge_prompts(context, target_lang, segments, translations, reference)
+        return self.provider.chat_json(
+            system_prompt,
+            user_prompt,
+            call_label="judge",
+            response_schema=JUDGE_RESPONSE_SCHEMA,
+        )
+
+    @staticmethod
+    def _parse(payload: dict, target_lang: str) -> dict:
         scores = {dimension: float(payload.get("scores", {}).get(dimension, 0.0)) for dimension in SCORE_DIMENSIONS}
         return {
             "target_lang": target_lang,

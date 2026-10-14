@@ -27,7 +27,6 @@ from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import ProtectedSpanProcessor, SegmentExtractor
 from src.validators.markdown_validator import MarkdownValidator
 
-
 SAMPLE_MARKDOWN = """---
 title: Sample Doc
 description: Demo description
@@ -47,6 +46,9 @@ class FakeProvider:
         from src.core.types import ApiUsageSummary
 
         return ApiUsageSummary()
+
+    async def chat_json_async(self, system_prompt: str, user_prompt: str, call_label: str = "llm", response_schema: dict | None = None):
+        return self.chat_json(system_prompt, user_prompt, call_label, response_schema)
 
     def chat_json(self, system_prompt: str, user_prompt: str, call_label: str = "llm", response_schema: dict | None = None):
         del system_prompt
@@ -199,7 +201,7 @@ class AstAndPipelineTests(unittest.TestCase):
             self.config.execution.max_parallel_translations = 1
 
             class FakePipeline:
-                def run(self, input_path, target_lang, write_output=True, output_path=None, bundle_executor=None, bundle_progress_callback=None):
+                async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
                     self.last_call = (input_path, target_lang, write_output, output_path)
                     if bundle_progress_callback is not None:
                         bundle_progress_callback(input_path, target_lang, "bundle-0")

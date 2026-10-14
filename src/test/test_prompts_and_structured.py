@@ -16,7 +16,6 @@ from src.llm.client import OpenAIProvider
 from src.llm.schemas import TRANSLATION_RESPONSE_SCHEMA
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
-
 from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider
 
 
@@ -34,7 +33,7 @@ def _fake_response(content: str = '{"translations":[]}') -> SimpleNamespace:
 
 
 def _make_provider(mode: str = "auto") -> OpenAIProvider:
-    with patch("openai.OpenAI"):
+    with patch("src.llm.client.OpenAI"):
         return OpenAIProvider(
             base_url="http://localhost:1",
             api_key="test-key",

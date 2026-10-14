@@ -77,7 +77,7 @@ def build_reviewer_prompts(bundle: SegmentBundle, context: DocumentContext, tran
                 "source": segment.source_text,
                 "text": translation.translated_text,
             }
-            for segment, translation in zip(bundle.segments, translations)
+            for segment, translation in zip(bundle.segments, translations, strict=False)
         ],
     }
     return system_prompt, _compact_json(payload)
@@ -102,7 +102,7 @@ def build_reflection_prompts(bundle: SegmentBundle, context: DocumentContext, tr
                 "source": segment.source_text,
                 "text": translation.translated_text,
             }
-            for segment, translation in zip(bundle.segments, translations)
+            for segment, translation in zip(bundle.segments, translations, strict=False)
         ],
     }
     return system_prompt, _compact_json(payload)
@@ -195,7 +195,7 @@ def build_guard_prompts(bundle: SegmentBundle, translations: list[TranslationRes
                 "source": segment.source_text,
                 "text": translation.translated_text,
             }
-            for segment, translation in zip(bundle.segments, translations)
+            for segment, translation in zip(bundle.segments, translations, strict=False)
         ],
     }
     return system_prompt, _compact_json(payload)

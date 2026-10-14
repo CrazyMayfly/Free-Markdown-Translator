@@ -9,7 +9,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import ProtectedSpanProcessor, SegmentExtractor
 
-
 SAMPLE_MARKDOWN = """---
 title: Sample Doc
 description: Demo description

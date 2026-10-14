@@ -13,7 +13,6 @@ class FormatGuardAgent:
     def repair_bundle(self, bundle: SegmentBundle, translations: list[TranslationResult]) -> list[TranslationResult]:
         if self.provider is None:
             return translations
-
         system_prompt, user_prompt = build_guard_prompts(bundle, translations)
         payload = self.provider.chat_json(
             system_prompt,
@@ -21,6 +20,22 @@ class FormatGuardAgent:
             call_label="format_guard",
             response_schema=TRANSLATION_RESPONSE_SCHEMA,
         )
+        return self._merge(bundle, translations, payload)
+
+    async def repair_bundle_async(self, bundle: SegmentBundle, translations: list[TranslationResult]) -> list[TranslationResult]:
+        if self.provider is None:
+            return translations
+        system_prompt, user_prompt = build_guard_prompts(bundle, translations)
+        payload = await self.provider.chat_json_async(
+            system_prompt,
+            user_prompt,
+            call_label="format_guard",
+            response_schema=TRANSLATION_RESPONSE_SCHEMA,
+        )
+        return self._merge(bundle, translations, payload)
+
+    @staticmethod
+    def _merge(bundle: SegmentBundle, translations: list[TranslationResult], payload: dict) -> list[TranslationResult]:
         repaired = {item["segment_id"]: item for item in payload.get("translations", [])}
         results: list[TranslationResult] = []
         for item in translations:

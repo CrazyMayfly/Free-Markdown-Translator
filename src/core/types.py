@@ -11,12 +11,21 @@ class ApiTokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
 
-    def add(self, prompt_tokens: int, completion_tokens: int, total_tokens: int, call_count: int = 1) -> None:
+    def add(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        call_count: int = 1,
+        cached_tokens: int = 0,
+    ) -> None:
         self.call_count += call_count
         self.prompt_tokens += prompt_tokens
         self.completion_tokens += completion_tokens
         self.total_tokens += total_tokens
+        self.cached_tokens += cached_tokens
 
 
 @dataclass
@@ -24,24 +33,27 @@ class ApiUsageSummary:
     total: ApiTokenUsage = field(default_factory=ApiTokenUsage)
     by_call_label: dict[str, ApiTokenUsage] = field(default_factory=dict)
 
-    def add(self, call_label: str, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+    def add(self, call_label: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, cached_tokens: int = 0) -> None:
         self.total.add(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
         )
         self.by_call_label.setdefault(call_label, ApiTokenUsage()).add(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
         )
 
-    def merge(self, other: "ApiUsageSummary") -> None:
+    def merge(self, other: ApiUsageSummary) -> None:
         self.total.add(
             prompt_tokens=other.total.prompt_tokens,
             completion_tokens=other.total.completion_tokens,
             total_tokens=other.total.total_tokens,
             call_count=other.total.call_count,
+            cached_tokens=other.total.cached_tokens,
         )
         for call_label, usage in other.by_call_label.items():
             self.by_call_label.setdefault(call_label, ApiTokenUsage()).add(
@@ -49,6 +61,7 @@ class ApiUsageSummary:
                 completion_tokens=usage.completion_tokens,
                 total_tokens=usage.total_tokens,
                 call_count=usage.call_count,
+                cached_tokens=usage.cached_tokens,
             )
 
 

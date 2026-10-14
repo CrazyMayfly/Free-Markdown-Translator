@@ -31,7 +31,6 @@ class ReviewerAgent:
     ) -> list[TranslationResult]:
         if self.provider is None:
             return translations
-
         system_prompt, user_prompt = build_reflection_prompts(bundle, context, translations)
         payload = self.provider.chat_json(
             system_prompt,
@@ -39,15 +38,37 @@ class ReviewerAgent:
             call_label="reflect",
             response_schema=REFLECTION_RESPONSE_SCHEMA,
         )
-        threshold = _SEVERITY_ORDER.get(min_severity, _SEVERITY_ORDER["high"])
-        issues = [
-            issue
-            for issue in payload.get("issues", [])
-            if _SEVERITY_ORDER.get(str(issue.get("severity", "")).lower(), 0) >= threshold
-        ]
+        return self._improve_if_needed(bundle, context, translations, payload, min_severity)
+
+    async def review_bundle_async(
+        self,
+        bundle: SegmentBundle,
+        translations: list[TranslationResult],
+        context: DocumentContext,
+        min_severity: str = "high",
+    ) -> list[TranslationResult]:
+        if self.provider is None:
+            return translations
+        system_prompt, user_prompt = build_reflection_prompts(bundle, context, translations)
+        payload = await self.provider.chat_json_async(
+            system_prompt,
+            user_prompt,
+            call_label="reflect",
+            response_schema=REFLECTION_RESPONSE_SCHEMA,
+        )
+        return await self._improve_if_needed_async(bundle, context, translations, payload, min_severity)
+
+    def _improve_if_needed(
+        self,
+        bundle: SegmentBundle,
+        context: DocumentContext,
+        translations: list[TranslationResult],
+        reflection_payload: dict,
+        min_severity: str,
+    ) -> list[TranslationResult]:
+        issues = self._qualifying_issues(reflection_payload, min_severity)
         if not issues:
             return translations
-
         logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
         system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
         payload = self.provider.chat_json(
@@ -56,7 +77,41 @@ class ReviewerAgent:
             call_label="improve",
             response_schema=TRANSLATION_RESPONSE_SCHEMA,
         )
-        updated = {item["segment_id"]: item for item in payload.get("translations", [])}
+        return self._merge_improvements(translations, issues, payload)
+
+    async def _improve_if_needed_async(
+        self,
+        bundle: SegmentBundle,
+        context: DocumentContext,
+        translations: list[TranslationResult],
+        reflection_payload: dict,
+        min_severity: str,
+    ) -> list[TranslationResult]:
+        issues = self._qualifying_issues(reflection_payload, min_severity)
+        if not issues:
+            return translations
+        logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
+        system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
+        payload = await self.provider.chat_json_async(
+            system_prompt,
+            user_prompt,
+            call_label="improve",
+            response_schema=TRANSLATION_RESPONSE_SCHEMA,
+        )
+        return self._merge_improvements(translations, issues, payload)
+
+    @staticmethod
+    def _qualifying_issues(reflection_payload: dict, min_severity: str) -> list[dict]:
+        threshold = _SEVERITY_ORDER.get(min_severity, _SEVERITY_ORDER["high"])
+        return [
+            issue
+            for issue in reflection_payload.get("issues", [])
+            if _SEVERITY_ORDER.get(str(issue.get("severity", "")).lower(), 0) >= threshold
+        ]
+
+    @staticmethod
+    def _merge_improvements(translations: list[TranslationResult], issues: list[dict], improve_payload: dict) -> list[TranslationResult]:
+        updated = {item["segment_id"]: item for item in improve_payload.get("translations", [])}
         comments_by_segment: dict[str, list[str]] = {}
         for issue in issues:
             comments_by_segment.setdefault(str(issue.get("segment_id", "")), []).append(str(issue.get("comment", "")))

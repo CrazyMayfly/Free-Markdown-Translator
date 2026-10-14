@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from concurrent.futures import Executor, Future, ThreadPoolExecutor, as_completed
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
 from src.core.errors import TranslationPipelineError
 from src.core.orchestrator import Orchestrator
-from src.core.types import PipelineResult, TranslationResult
+from src.core.types import PipelineResult, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success
+from src.memory.checkpoint import JobCheckpointStore
 from src.memory.document_context import DocumentContextBuilder
+from src.memory.translation_memory import NullMemory, TranslationMemory
 from src.parser.ast_mapper import AstMapper
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.renderer import MarkdownRenderer
@@ -33,6 +35,8 @@ class TranslationPipeline:
         reviewer_agent: ReviewerAgent,
         format_guard_agent: FormatGuardAgent,
         validator: MarkdownValidator,
+        memory: object | None = None,
+        checkpoint_store: JobCheckpointStore | None = None,
     ) -> None:
         self.config = config
         self.parser = parser
@@ -41,6 +45,8 @@ class TranslationPipeline:
         self.reviewer_agent = reviewer_agent
         self.format_guard_agent = format_guard_agent
         self.validator = validator
+        self.memory = memory if memory is not None else NullMemory()
+        self.checkpoint_store = checkpoint_store
         self.context_builder = DocumentContextBuilder()
         self.orchestrator = Orchestrator()
         self.protected_span_processor = ProtectedSpanProcessor()
@@ -54,7 +60,25 @@ class TranslationPipeline:
         target_lang: str,
         write_output: bool = True,
         output_path: Path | None = None,
-        bundle_executor: Executor | None = None,
+        bundle_progress_callback: Callable[[Path, str, str], None] | None = None,
+    ) -> PipelineResult:
+        return asyncio.run(
+            self.run_async(
+                input_path=input_path,
+                target_lang=target_lang,
+                write_output=write_output,
+                output_path=output_path,
+                bundle_progress_callback=bundle_progress_callback,
+            )
+        )
+
+    async def run_async(
+        self,
+        input_path: Path,
+        target_lang: str,
+        write_output: bool = True,
+        output_path: Path | None = None,
+        semaphore: asyncio.Semaphore | None = None,
         bundle_progress_callback: Callable[[Path, str, str], None] | None = None,
     ) -> PipelineResult:
         logging.info("Pipeline: %s -> %s", input_path.name, target_lang)
@@ -69,15 +93,19 @@ class TranslationPipeline:
 
         segment_lookup = {segment.segment_id: segment for segment in segments}
         mode = self._normalized_mode()
-        all_translations = self._translate_bundles(
+        resumed_bundles = self.checkpoint_store.load(input_path, target_lang) if self.checkpoint_store is not None else {}
+        if resumed_bundles:
+            logging.info("Resuming %s: %s/%s bundles already completed", input_path.name, len(resumed_bundles), len(bundles))
+        all_translations = await self._translate_bundles(
             bundles=bundles,
             context=context,
             target_lang=target_lang,
             segment_lookup=segment_lookup,
             mode=mode,
             input_path=input_path,
-            bundle_executor=bundle_executor,
+            semaphore=semaphore,
             bundle_progress_callback=bundle_progress_callback,
+            resumed_bundles=resumed_bundles,
         )
 
         output_text, validation, all_translations = self._render_and_validate(
@@ -91,7 +119,7 @@ class TranslationPipeline:
             translations_by_bundle = self._translations_by_bundle(bundles, all_translations)
             for bundle in bundles:
                 bundle_translations = translations_by_bundle[bundle.bundle_id]
-                repaired.extend(self.format_guard_agent.repair_bundle(bundle, bundle_translations))
+                repaired.extend(await self.format_guard_agent.repair_bundle_async(bundle, bundle_translations))
             for item in repaired:
                 item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
             output_text, validation, all_translations = self._render_and_validate(
@@ -109,6 +137,9 @@ class TranslationPipeline:
             final_output_path.write_text(output_text, encoding="utf-8")
             log_success("Saved markdown: %s", final_output_path)
 
+        if self.checkpoint_store is not None and validation.passed:
+            self.checkpoint_store.clear(input_path, target_lang)
+
         result = PipelineResult(
             input_path=input_path,
             output_path=final_output_path if write_output else None,
@@ -119,6 +150,9 @@ class TranslationPipeline:
             api_usage=self.translator_agent.provider.get_usage_summary(),
             context=context,
         )
+        memory_stats = self.memory.stats()
+        if memory_stats["hits"] or memory_stats["misses"]:
+            logging.info("Memory: hits=%s misses=%s", memory_stats["hits"], memory_stats["misses"])
         result.report = self.report_builder.build(result)
         return result
 
@@ -129,6 +163,15 @@ class TranslationPipeline:
         context = self.context_builder.build(parsed, segments, self.config)
         bundles = self.orchestrator.build_bundles(segments, context, self.config)
         return len(bundles)
+
+    def _memory_fingerprint(self) -> str:
+        return TranslationMemory.style_fingerprint(
+            model=self.config.provider.model,
+            tone=self.config.style.tone,
+            audience=self.config.style.audience,
+            instructions=self.config.style.instructions,
+            preserve_terms=self.config.style.preserve_terms,
+        )
 
     def _build_output_path(self, input_path: Path, target_lang: str) -> Path:
         normalized_lang = self._normalize_lang_for_filename(target_lang)
@@ -184,7 +227,7 @@ class TranslationPipeline:
             logging.warning("Validation: %s errors, %s warnings", len(validation.errors), len(validation.warnings))
         return output_text, validation, translations
 
-    def _translate_bundles(
+    async def _translate_bundles(
         self,
         bundles,
         context,
@@ -192,64 +235,41 @@ class TranslationPipeline:
         segment_lookup,
         mode: str,
         input_path: Path,
-        bundle_executor: Executor | None,
+        semaphore: asyncio.Semaphore | None,
         bundle_progress_callback: Callable[[Path, str, str], None] | None,
+        resumed_bundles: dict[str, list[TranslationResult]],
     ) -> list[TranslationResult]:
         if not bundles:
             return []
 
-        configured_workers = max(1, self.config.execution.max_parallel_translations)
-        if configured_workers == 1 and bundle_executor is None:
-            all_translations: list[TranslationResult] = []
-            for index, bundle in enumerate(bundles, start=1):
-                logging.info("Bundle %s/%s: translating %s (%s segments)", index, len(bundles), bundle.bundle_id, len(bundle.segments))
-                translations = self._process_bundle(bundle, context, target_lang, segment_lookup, mode)
-                all_translations.extend(translations)
-                if bundle_progress_callback is not None:
-                    bundle_progress_callback(input_path, target_lang, bundle.bundle_id)
-            return all_translations
+        limit = semaphore or asyncio.Semaphore(max(1, self.config.execution.max_parallel_translations))
+        resumed_ids = set(resumed_bundles)
 
-        owns_executor = bundle_executor is None
-        executor = bundle_executor or ThreadPoolExecutor(
-            max_workers=min(configured_workers, len(bundles)),
-            thread_name_prefix="mdtx-bundle",
-        )
-        try:
-            future_to_bundle: dict[Future[list[TranslationResult]], tuple[int, object]] = {}
-            for index, bundle in enumerate(bundles, start=1):
-                logging.info("Bundle %s/%s: queued %s (%s segments)", index, len(bundles), bundle.bundle_id, len(bundle.segments))
-                future = executor.submit(
-                    self._process_bundle,
-                    bundle,
-                    context,
-                    target_lang,
-                    segment_lookup,
-                    mode,
-                )
-                future_to_bundle[future] = (index, bundle)
-
-            ordered_results: dict[int, list[TranslationResult]] = {}
-            try:
-                for future in as_completed(future_to_bundle):
-                    index, bundle = future_to_bundle[future]
-                    ordered_results[index] = future.result()
+        async def worker(bundle: SegmentBundle) -> list[TranslationResult]:
+            async with limit:
+                if bundle.bundle_id in resumed_ids:
+                    translations = resumed_bundles[bundle.bundle_id]
+                    for item in translations:
+                        item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
                     if bundle_progress_callback is not None:
                         bundle_progress_callback(input_path, target_lang, bundle.bundle_id)
-            except Exception:
-                for pending_future in future_to_bundle:
-                    if not pending_future.done():
-                        pending_future.cancel()
-                raise
+                    return translations
+                translations = await self._process_bundle(bundle, context, target_lang, segment_lookup, mode)
+                if self.checkpoint_store is not None:
+                    self.checkpoint_store.save_bundle(input_path, target_lang, bundle.bundle_id, translations)
+                if bundle_progress_callback is not None:
+                    bundle_progress_callback(input_path, target_lang, bundle.bundle_id)
+                return translations
 
-            all_translations: list[TranslationResult] = []
-            for index in range(1, len(bundles) + 1):
-                all_translations.extend(ordered_results[index])
-            return all_translations
-        finally:
-            if owns_executor:
-                executor.shutdown(wait=True)
+        logging.info("Translating %s bundles (concurrency=%s)", len(bundles), getattr(limit, "_value", "?"))
+        async with asyncio.TaskGroup() as task_group:
+            futures = [task_group.create_task(worker(bundle)) for bundle in bundles]
+        all_translations: list[TranslationResult] = []
+        for future in futures:
+            all_translations.extend(future.result())
+        return all_translations
 
-    def _process_bundle(
+    async def _process_bundle(
         self,
         bundle,
         context,
@@ -259,17 +279,75 @@ class TranslationPipeline:
     ) -> list[TranslationResult]:
         logging.info("Translating %s (%s segments)", bundle.bundle_id, len(bundle.segments))
 
+        fingerprint = self._memory_fingerprint()
+        cached: dict[str, str] = {}
+        for segment in bundle.segments:
+            hit = self.memory.find(segment.source_text, target_lang, fingerprint)
+            if hit is not None:
+                cached[segment.segment_id] = hit
+
+        if cached:
+            logging.info("Memory reuse: %s/%s segments in %s", len(cached), len(bundle.segments), bundle.bundle_id)
+
+        pending_segments = [segment for segment in bundle.segments if segment.segment_id not in cached]
         translations: list[TranslationResult] | None = None
+        if pending_segments:
+            pending_bundle = SegmentBundle(
+                bundle_id=bundle.bundle_id,
+                segments=pending_segments,
+                summary_before=bundle.summary_before,
+                summary_after=bundle.summary_after,
+                style_instructions=bundle.style_instructions,
+            )
+            translations = await self._translate_with_retry(pending_bundle, context, target_lang)
+
+        merged: dict[str, TranslationResult] = {item.segment_id: item for item in (translations or [])}
+        for segment in bundle.segments:
+            if segment.segment_id in cached:
+                merged[segment.segment_id] = TranslationResult(
+                    segment_id=segment.segment_id,
+                    translated_text=cached[segment.segment_id],
+                    notes=["translation-memory"],
+                    applied_terms={},
+                    confidence=1.0,
+                )
+        ordered = [merged[segment.segment_id] for segment in bundle.segments]
+
+        if not pending_segments:
+            # Every segment came from memory and was already reviewed in a
+            # previous run; skip reflection to make reuse free.
+            for item in ordered:
+                item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
+            return ordered
+
+        if self._should_run_review(bundle, ordered):
+            logging.info("Reviewing %s (%s)", bundle.bundle_id, mode)
+            ordered = await self.reviewer_agent.review_bundle_async(
+                bundle,
+                ordered,
+                context,
+                min_severity=self._review_min_severity(),
+            )
+
+        for item in ordered:
+            if item.segment_id in cached and item.notes == ["translation-memory"]:
+                continue
+            self.memory.store(segment_lookup[item.segment_id].source_text, target_lang, item.translated_text, fingerprint, item.confidence)
+
+        for item in ordered:
+            item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
+        return ordered
+
+    async def _translate_with_retry(self, bundle, context, target_lang: str) -> list[TranslationResult]:
         last_exc: Exception | None = None
         max_attempts = 5  # Retry budget for LLM output format issues.
         for attempt in range(1, max_attempts + 1):
             try:
-                translations = self.translator_agent.translate_bundle(
+                return await self.translator_agent.translate_bundle_async(
                     bundle=bundle,
                     context=context,
                     target_lang=target_lang,
                 )
-                break
             except Exception as exc:
                 last_exc = exc
                 if not self._looks_like_llm_output_format_error(exc):
@@ -283,22 +361,8 @@ class TranslationPipeline:
                     max_attempts,
                     exc,
                 )
-
-        if translations is None and last_exc is not None:
-            raise last_exc
-        assert translations is not None
-
-        if self._should_run_review(bundle, translations):
-            logging.info("Reviewing %s (%s)", bundle.bundle_id, mode)
-            translations = self.reviewer_agent.review_bundle(
-                bundle,
-                translations,
-                context,
-                min_severity=self._review_min_severity(),
-            )
-        for item in translations:
-            item.translated_text = self.protected_span_processor.restore(item.translated_text, segment_lookup[item.segment_id])
-        return translations
+        assert last_exc is not None
+        raise last_exc
 
     @staticmethod
     def _looks_like_llm_output_format_error(exc: Exception) -> bool:

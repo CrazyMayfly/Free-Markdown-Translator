@@ -6,7 +6,6 @@ import logging
 
 from colorlog import ColoredFormatter
 
-
 _log_context: contextvars.ContextVar[str] = contextvars.ContextVar("log_context", default="")
 _RESET = "\033[0m"
 _GREEN = "\033[32m"

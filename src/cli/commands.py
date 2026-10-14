@@ -1,33 +1,36 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
 import threading
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
+
+from tqdm import tqdm
 
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.judge_agent import JudgeAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
-from src.core.pipeline import TranslationPipeline
 from src.core.orchestrator import Orchestrator
+from src.core.pipeline import TranslationPipeline
 from src.core.types import ApiUsageSummary
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success, log_task_context
-from src.llm.client import OpenAIProvider
+from src.llm.client import AsyncOpenAIProvider
+from src.memory.checkpoint import JobCheckpointStore
 from src.memory.document_context import DocumentContextBuilder
+from src.memory.translation_memory import build_memory
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
 from src.validators.markdown_validator import MarkdownValidator
-from tqdm import tqdm
 
 
 def _build_provider(config: TranslatorConfig):
     if config.provider.name == "openai":
-        return OpenAIProvider(
+        return AsyncOpenAIProvider(
             base_url=config.provider.base_url,
             api_key=config.provider.api_key,
             api_key_env=config.provider.api_key_env,
@@ -35,11 +38,12 @@ def _build_provider(config: TranslatorConfig):
             temperature=config.provider.temperature,
             max_tokens=config.provider.max_tokens,
             structured_outputs=config.provider.structured_outputs,
+            max_retries=config.provider.max_retries,
         )
     raise ValueError(f"Provider {config.provider.name} is not implemented.")
 
 
-def build_pipeline(config: TranslatorConfig) -> TranslationPipeline:
+def build_pipeline(config: TranslatorConfig, memory: object | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
     provider = _build_provider(config)
     return TranslationPipeline(
         config=config,
@@ -49,6 +53,8 @@ def build_pipeline(config: TranslatorConfig) -> TranslationPipeline:
         reviewer_agent=ReviewerAgent(provider if config.pipeline.enable_review else None),
         format_guard_agent=FormatGuardAgent(provider if config.pipeline.enable_format_guard else None),
         validator=MarkdownValidator(),
+        memory=memory,
+        checkpoint_store=checkpoint_store,
     )
 
 
@@ -78,10 +84,6 @@ class TranslationTask:
 def _resolve_parallel_workers(config: TranslatorConfig, task_count: int) -> int:
     configured = max(1, config.execution.max_parallel_translations)
     return min(configured, max(1, task_count))
-
-
-def _resolve_bundle_workers(config: TranslatorConfig) -> int:
-    return max(1, config.execution.max_parallel_translations)
 
 
 class BundleProgressTracker:
@@ -180,12 +182,43 @@ def _build_translation_tasks(
     return tasks
 
 
-def _run_translation_task(task: TranslationTask, config: TranslatorConfig):
+def _task_checkpoint_store(task: TranslationTask, config: TranslatorConfig, checkpoint_dir: Path | None):
+    if checkpoint_dir is None:
+        return None
+    fingerprint = JobCheckpointStore.fingerprint(
+        model=config.provider.model,
+        tone=config.style.tone,
+        audience=config.style.audience,
+        mode=config.pipeline.mode,
+    )
+    return JobCheckpointStore(checkpoint_dir, fingerprint)
+
+
+async def _run_translation_task_async(
+    task: TranslationTask,
+    config: TranslatorConfig,
+    memory: object,
+    checkpoint_dir: Path | None,
+    semaphore: asyncio.Semaphore,
+    progress_tracker: BundleProgressTracker | None,
+):
     with log_task_context(task.label):
-        pipeline = build_pipeline(copy.deepcopy(config))
+        checkpoint_store = _task_checkpoint_store(task, config, checkpoint_dir)
+        pipeline = build_pipeline(copy.deepcopy(config), memory=memory, checkpoint_store=checkpoint_store)
         logging.info("Task start: %s -> %s", task.source.input_path, task.target_lang)
-        result = pipeline.run(task.source.input_path, task.target_lang, write_output=True, output_path=task.output_path)
+        result = await pipeline.run_async(
+            task.source.input_path,
+            task.target_lang,
+            write_output=True,
+            output_path=task.output_path,
+            semaphore=semaphore,
+            bundle_progress_callback=progress_tracker.update if progress_tracker is not None else None,
+        )
         log_success("Task done: %s", result.output_path)
+        if config.output.write_report and result.output_path is not None:
+            report_path = result.output_path.with_suffix(result.output_path.suffix + ".report.json")
+            report_path.write_text(json.dumps(result.report, ensure_ascii=False, indent=2), encoding="utf-8")
+            log_success("Saved report: %s", report_path)
         return task, result
 
 
@@ -215,12 +248,13 @@ def _count_task_bundles(task: TranslationTask, config: TranslatorConfig, cache: 
 
 def _log_task_token_usage(task: TranslationTask, usage: ApiUsageSummary) -> None:
     logging.info(
-        "Tokens %s -> %s: prompt=%s completion=%s total=%s calls=%s",
+        "Tokens %s -> %s: prompt=%s completion=%s total=%s cached=%s calls=%s",
         task.source.input_path.name,
         task.target_lang,
         usage.total.prompt_tokens,
         usage.total.completion_tokens,
         usage.total.total_tokens,
+        usage.total.cached_tokens,
         usage.total.call_count,
     )
     if usage.by_call_label:
@@ -228,7 +262,7 @@ def _log_task_token_usage(task: TranslationTask, usage: ApiUsageSummary) -> None
         for call_label in sorted(usage.by_call_label):
             item = usage.by_call_label[call_label]
             parts.append(
-                f"{call_label}(c={item.call_count}, p={item.prompt_tokens}, o={item.completion_tokens}, t={item.total_tokens})"
+                f"{call_label}(c={item.call_count}, p={item.prompt_tokens}, o={item.completion_tokens}, cached={item.cached_tokens}, t={item.total_tokens})"
             )
         logging.info(
             "Token stages %s -> %s: %s",
@@ -239,12 +273,17 @@ def _log_task_token_usage(task: TranslationTask, usage: ApiUsageSummary) -> None
 
 
 def _log_total_token_usage(usage: ApiUsageSummary, task_count: int) -> None:
+    cached_note = ""
+    if usage.total.cached_tokens:
+        share = (usage.total.cached_tokens / usage.total.prompt_tokens * 100) if usage.total.prompt_tokens else 0.0
+        cached_note = f" cached={usage.total.cached_tokens} ({share:.0f}% of prompt)"
     logging.info(
-        "Job tokens: tasks=%s prompt=%s completion=%s total=%s calls=%s",
+        "Job tokens: tasks=%s prompt=%s completion=%s total=%s%s calls=%s",
         task_count,
         usage.total.prompt_tokens,
         usage.total.completion_tokens,
         usage.total.total_tokens,
+        cached_note,
         usage.total.call_count,
     )
     if usage.by_call_label:
@@ -252,30 +291,44 @@ def _log_total_token_usage(usage: ApiUsageSummary, task_count: int) -> None:
         for call_label in sorted(usage.by_call_label):
             item = usage.by_call_label[call_label]
             parts.append(
-                f"{call_label}(c={item.call_count}, p={item.prompt_tokens}, o={item.completion_tokens}, t={item.total_tokens})"
+                f"{call_label}(c={item.call_count}, p={item.prompt_tokens}, o={item.completion_tokens}, cached={item.cached_tokens}, t={item.total_tokens})"
             )
         logging.info("Job token stages: %s", "; ".join(parts))
 
 
-def _run_translation_task_with_shared_bundle_executor(
-    task: TranslationTask,
+async def _translate_all_tasks(
+    tasks: list[TranslationTask],
     config: TranslatorConfig,
-    bundle_executor: ThreadPoolExecutor,
-    progress_tracker: BundleProgressTracker | None,
-):
-    with log_task_context(task.label):
-        pipeline = build_pipeline(copy.deepcopy(config))
-        logging.info("Task start: %s -> %s", task.source.input_path, task.target_lang)
-        result = pipeline.run(
-            task.source.input_path,
-            task.target_lang,
-            write_output=True,
-            output_path=task.output_path,
-            bundle_executor=bundle_executor,
-            bundle_progress_callback=progress_tracker.update if progress_tracker is not None else None,
-        )
-        log_success("Task done: %s", result.output_path)
-        return task, result
+    memory: object,
+    checkpoint_dir: Path | None,
+    total_bundles: int,
+) -> ApiUsageSummary:
+    """Run every file x language task under one event loop.
+
+    A single shared semaphore caps global LLM concurrency, and TaskGroup
+    cancels sibling tasks on the first failure (fast-fail semantics).
+    """
+    semaphore = asyncio.Semaphore(max(1, config.execution.max_parallel_translations))
+    progress_tracker = BundleProgressTracker(total_bundles)
+    total_usage = ApiUsageSummary()
+    completed = 0
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            futures = [
+                task_group.create_task(
+                    _run_translation_task_async(task, config, memory, checkpoint_dir, semaphore, progress_tracker)
+                )
+                for task in tasks
+            ]
+    finally:
+        progress_tracker.close()
+    for task, future in zip(tasks, futures, strict=False):
+        _, result = future.result()
+        completed += 1
+        total_usage.merge(result.api_usage)
+        _log_task_token_usage(task, result.api_usage)
+        log_success("[%s/%s] Completed: %s -> %s", completed, len(tasks), task.source.input_path, result.output_path)
+    return total_usage
 
 
 def translate_command(
@@ -284,6 +337,7 @@ def translate_command(
     config: TranslatorConfig,
     output_dir: str | None = None,
     match_pattern: str | None = None,
+    resume: bool = False,
 ) -> int:
     if any(_looks_like_output_path(lang) for lang in target_langs):
         raise ValueError("`--to` expects language codes, not file paths. Use `--output` to specify an output directory.")
@@ -292,99 +346,23 @@ def translate_command(
     resolved_output_dir = Path(output_dir or config.output.directory)
     sources = _collect_translation_sources(paths, resolved_match_pattern)
     tasks = _build_translation_tasks(sources, target_langs, resolved_output_dir, config)
-    task_workers = _resolve_parallel_workers(config, len(tasks))
-    bundle_workers = _resolve_bundle_workers(config)
     bundle_count_cache: dict[Path, int] = {}
     total_bundles = sum(_count_task_bundles(task, config, bundle_count_cache) for task in tasks)
     logging.info(
-        "Job start: files=%s targets=%s tasks=%s bundles=%s workers=%s/%s",
+        "Job start: files=%s targets=%s tasks=%s bundles=%s concurrency=%s resume=%s",
         len(sources),
         ", ".join(target_langs),
         len(tasks),
         total_bundles,
-        task_workers,
-        bundle_workers,
+        max(1, config.execution.max_parallel_translations),
+        resume,
     )
-    total_usage = ApiUsageSummary()
-
-    if task_workers == 1 and bundle_workers == 1:
-        progress_tracker = BundleProgressTracker(total_bundles)
-        try:
-            for task in tasks:
-                pipeline = build_pipeline(copy.deepcopy(config))
-                _, result = task, pipeline.run(
-                    task.source.input_path,
-                    task.target_lang,
-                    write_output=True,
-                    output_path=task.output_path,
-                    bundle_progress_callback=progress_tracker.update,
-                )
-                total_usage.merge(result.api_usage)
-                _log_task_token_usage(task, result.api_usage)
-                if config.output.write_report and result.output_path is not None:
-                    report_path = result.output_path.with_suffix(result.output_path.suffix + ".report.json")
-                    report_path.write_text(json.dumps(result.report, ensure_ascii=False, indent=2), encoding="utf-8")
-                    log_success("Saved report: %s", report_path)
-        finally:
-            progress_tracker.close()
-        _log_total_token_usage(total_usage, len(tasks))
-        return 0
-
-    completed = 0
-    future_to_task = {}
-    progress_tracker = BundleProgressTracker(total_bundles)
+    memory = build_memory(config)
+    checkpoint_dir = (resolved_output_dir / ".mdtx-state") if resume else None
     try:
-        with ThreadPoolExecutor(max_workers=task_workers, thread_name_prefix="mdtx-translate") as executor:
-            with ThreadPoolExecutor(max_workers=bundle_workers, thread_name_prefix="mdtx-bundle") as bundle_executor:
-                for task in tasks:
-                    future_to_task[
-                        executor.submit(
-                            _run_translation_task_with_shared_bundle_executor,
-                            task,
-                            config,
-                            bundle_executor,
-                            progress_tracker,
-                        )
-                    ] = task
-
-                pending = set(future_to_task)
-                while pending:
-                    done, pending = wait(pending, return_when=FIRST_EXCEPTION)
-                    for future in done:
-                        task = future_to_task[future]
-                        try:
-                            _, result = future.result()
-                        except Exception:
-                            for pending_future in pending:
-                                pending_future.cancel()
-                            logging.error(
-                                "Translation task failed: source=%s target=%s",
-                                task.source.input_path,
-                                task.target_lang,
-                            )
-                            raise
-
-                        completed += 1
-                        total_usage.merge(result.api_usage)
-                        _log_task_token_usage(task, result.api_usage)
-                        if config.output.write_report and result.output_path is not None:
-                            report_path = result.output_path.with_suffix(result.output_path.suffix + ".report.json")
-                            report_path.write_text(json.dumps(result.report, ensure_ascii=False, indent=2), encoding="utf-8")
-                            log_success(
-                                "[%s/%s] Saved report: %s",
-                                completed,
-                                len(tasks),
-                                report_path,
-                            )
-                        log_success(
-                            "[%s/%s] Completed: %s -> %s",
-                            completed,
-                            len(tasks),
-                            task.source.input_path,
-                            result.output_path,
-                        )
-    finally:
-        progress_tracker.close()
+        total_usage = asyncio.run(_translate_all_tasks(tasks, config, memory, checkpoint_dir, total_bundles))
+    except* Exception as group:
+        raise group.exceptions[0] from None
     _log_total_token_usage(total_usage, len(tasks))
     return 0
 
@@ -417,9 +395,9 @@ def report_command(path: str, target_lang: str, config: TranslatorConfig) -> int
 def evaluate_command(path: str, target_lang: str, config: TranslatorConfig) -> int:
     """Translate one file and print an LLM-as-judge quality report."""
     pipeline = build_pipeline(config)
-    result = pipeline.run(Path(path), target_lang, write_output=False)
+    result = asyncio.run(pipeline.run_async(Path(path), target_lang, write_output=False))
     judge = JudgeAgent(_build_provider(config))
-    judge_report = judge.evaluate(result.segments, result.translations, result.context, target_lang)
+    judge_report = asyncio.run(judge.evaluate_async(result.segments, result.translations, result.context, target_lang))
     judge_report["input_path"] = str(path)
     judge_report["validation_passed"] = result.validation.passed
     judge_report["api_usage"] = {

@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_CONFIG_DIRNAME = ".mdtx"
 DEFAULT_CONFIG_FILENAME = "config.yaml"
 
@@ -22,6 +21,13 @@ class ProviderConfig:
     temperature: float = 0.2
     max_tokens: int = 8000
     structured_outputs: str = "auto"
+    max_retries: int = 3
+
+
+@dataclass
+class MemoryConfig:
+    enabled: bool = True
+    path: str = ".mdtx/memory.sqlite3"
 
 
 @dataclass
@@ -81,6 +87,7 @@ class TranslatorConfig:
     style: StyleConfig = field(default_factory=StyleConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
 
 def _workspace_root() -> Path:
@@ -136,6 +143,7 @@ def _default_config_dict() -> dict[str, Any]:
             "temperature": 0.2,
             "max_tokens": 8000,
             "structured_outputs": "auto",
+            "max_retries": 3,
         },
         "pipeline": {
             "mode": "balanced",
@@ -170,6 +178,10 @@ def _default_config_dict() -> dict[str, Any]:
         "execution": {
             "max_parallel_translations": 5,
         },
+        "memory": {
+            "enabled": True,
+            "path": ".mdtx/memory.sqlite3",
+        },
     }
 
 
@@ -195,6 +207,8 @@ provider:
   # 结构化输出模式：auto = 优先 json_schema 受限解码、端点不支持时自动降级；
   # on = 强制 json_schema；off = 始终使用 json_object。
   structured_outputs: auto
+  # 瞬时错误（限流 429/5xx/超时）自动重试次数，指数退避并尊重 Retry-After。
+  max_retries: 3
 
 # 翻译流程控制。
 pipeline:
@@ -249,6 +263,13 @@ output:
 execution:
   # 全局 bundle 级最大并行翻译数。
   max_parallel_translations: 5
+
+# 翻译记忆设置。
+memory:
+  # 启用后，完全相同的段落（同源文、同语言、同模型、同风格配置）直接复用历史译文，跳过 LLM 调用。
+  enabled: true
+  # SQLite 记忆库路径。
+  path: .mdtx/memory.sqlite3
 """
 
 
@@ -300,4 +321,5 @@ def load_config(config_path: str | None = None) -> TranslatorConfig:
         style=StyleConfig(**_filter_known_keys(data["style"], StyleConfig, "style")),
         output=OutputConfig(**_filter_known_keys(data["output"], OutputConfig, "output")),
         execution=ExecutionConfig(**_filter_known_keys(data["execution"], ExecutionConfig, "execution")),
+        memory=MemoryConfig(**_filter_known_keys(data["memory"], MemoryConfig, "memory")),
     )

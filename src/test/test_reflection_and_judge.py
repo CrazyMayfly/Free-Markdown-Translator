@@ -21,9 +21,8 @@ from src.infra.config import TranslatorConfig
 from src.llm.schemas import JUDGE_RESPONSE_SCHEMA, REFLECTION_RESPONSE_SCHEMA, TRANSLATION_RESPONSE_SCHEMA
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
-from src.validators.markdown_validator import MarkdownValidator
-
 from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent, TranslatorAgent
+from src.validators.markdown_validator import MarkdownValidator
 
 
 class IssueFakeProvider(FakeProvider):
@@ -151,7 +150,7 @@ class JudgeTests(unittest.TestCase):
         provider = FakeProvider()
 
         class FakePipeline:
-            def run(self, input_path, target_lang, write_output=True, output_path=None, bundle_executor=None, bundle_progress_callback=None):
+            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
                 parsed_segments = SegmentExtractor().extract(MarkdownParser().parse(SAMPLE_MARKDOWN, Path(input_path), target_lang))
                 return SimpleNamespace(
                     segments=parsed_segments,
