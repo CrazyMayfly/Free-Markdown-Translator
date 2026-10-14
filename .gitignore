@@ -167,3 +167,5 @@ blogHelper.py
 #.idea/
 .zcode/
 .mdtx/
+ui/src-tauri/icons/android/
+ui/src-tauri/icons/ios/

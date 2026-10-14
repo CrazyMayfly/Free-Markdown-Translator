@@ -168,9 +168,33 @@ mdtx --serve
 - `translate_markdown(path, target_langs, mode?, tone?, model?, write?)`：翻译 Markdown 文件，返回各语言的译文、校验结果与 token 用量，翻译进度通过 MCP 进度通知上报
 - `evaluate_translation(path, target_lang)`：翻译并用 LLM-as-judge 打分（准确度/流畅度/术语/格式）
 
-## 🖥️ 桌面 UI（Tauri + Vue3）
+## 🖥️ 桌面应用（Tauri + Vue3）
 
-`mdtx` 附带一个本地桌面工作台：文件浏览选择、实时翻译进度（SSE）、双栏译文对照、LLM 质量评分、配置管理、翻译记忆管理。架构是 Tauri 2 壳 + Vue3 前端 + Python FastAPI sidecar（复用完整翻译管线），仅监听 `127.0.0.1`。
+`mdtx` 附带一个本地桌面工作台：架构是 Tauri 2 壳 + Vue3 前端 + Python FastAPI sidecar（复用完整翻译管线），仅监听 `127.0.0.1`，不依赖任何云服务。
+
+### 下载安装
+
+到 [Releases](https://github.com/CrazyMayfly/Free-Markdown-Translator/releases) 下载对应平台安装包（由 GitHub Actions 自动构建发布）：
+
+| 平台 | 产物 |
+|------|------|
+| macOS (Apple Silicon) | `mdtx_0.1.0_aarch64.dmg`（未签名，首次打开需右键 → 打开） |
+| Windows x64 | `mdtx_0.1.0_x64-setup.exe` |
+| Ubuntu/Debian | `mdtx_0.1.0_amd64.deb` |
+
+首次启动后在「配置」页填入 base_url / API Key / 模型（可用「测试连接」验证），即可开始翻译。
+
+### 功能一览
+
+- **新建任务**：访达拖拽 / 文件浏览器多选文件或整个目录（按 `*.md` 递归收集）、语言标签多选、快速/平衡/严格模式、断点续传
+- **实时进度**：任务 × 翻译对双层进度、bundle 级进度条、token 用量实时累计（含前缀缓存命中）、SSE 事件流；多文件 × 多语言任务自动并行执行
+- **任务记录**：所有任务持久化到本机（`~/.mdtx/history.sqlite3`），重启应用不丢；支持「再来一次」按原参数重新提交、删除记录
+- **结果页**：渲染视图 / 分段对照双视图；段落级人工修订（保存后自动同步整篇译文）；一键复制译文、保存到文件、在访达中显示；LLM 质量评估四维评分条
+- **写失败保护**：输出文件写入失败时译文不丢失，结果页可一键手动保存
+- **系统通知**：任务在后台完成/失败时弹系统通知
+- **配置管理**：表单化编辑 `~/.mdtx/config.yaml`（API Key 掩码显示、不回显）、一键测试模型端点连通性（延迟 + 模型列表）、翻译记忆统计与清空
+
+### 本地开发
 
 开发模式（三种，按需选择）：
 
@@ -188,6 +212,10 @@ cd ui && npx tauri build
 ```
 
 环境要求：Node ≥18（nvm 安装即可）、Rust stable（rustup）、Python 依赖 `pip install -e ".[ui]"`。
+
+### 发布流程
+
+三个平台的安装包由 GitHub Actions 自动构建：推送 `v*` 标签即触发（`.github/workflows/release.yml`），矩阵覆盖 macOS arm64 / Windows x64 / Ubuntu x64，构建产物自动挂到对应 Release。也可以在 Actions 页面手动触发 `workflow_dispatch` 只出产物不发布。
 
 ## 🔌 兼容的模型服务
 
