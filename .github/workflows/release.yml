@@ -33,7 +33,11 @@ jobs:
       - name: Disable Windows Defender real-time monitoring
         if: runner.os == 'Windows'
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          Add-MpPreference -ExclusionPath "$(Get-Location)" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess "pyinstaller.exe" -ErrorAction SilentlyContinue
+          Get-MpPreference | Select-Object DisableRealtimeMonitoring | Format-List
 
       - uses: actions/setup-python@v5
         with:
@@ -73,7 +77,11 @@ jobs:
 
       - name: Verify sidecar binary
         shell: bash
-        run: ls -la ui/src-tauri/binaries/
+        run: |
+          ls -la ui/src-tauri/binaries/
+          name="mdtx-api-${{ matrix.target }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then name="$name.exe"; fi
+          test -f "ui/src-tauri/binaries/$name" && echo "sidecar present: $name"
 
       - name: Build Tauri app
         working-directory: ui
@@ -89,11 +97,24 @@ jobs:
         run: |
           # Anonymous visitors cannot read job logs; surface the error tail as
           # check-run annotations so failures are diagnosable from the API.
-          tail -c 5000 build-log.txt | sed 's/%/%25/g' | awk '{printf "%s\\n", $0}' | head -c 3800 > /tmp/ann.txt
-          echo "::error title=tauri build tail::$(cat /tmp/ann.txt)"
-          grep -iE "^error|error\[|panicked|failed" build-log.txt | head -10 | while IFS= read -r line; do
-            echo "::error::${line:0:3000}"
-          done
+          echo "--- binaries dir at failure time ---"
+          ls -la src-tauri/binaries/ || true
+          ls -la src-tauri/target/*/release/bundle/ 2>/dev/null || true
+          {
+            echo "binaries dir:"
+            ls -la src-tauri/binaries/ 2>/dev/null
+          } | sed 's/%/%25/g' | awk '{printf "%s\\n", $0}' | head -c 1500 > /tmp/ann.txt
+          echo "::error title=sidecar dir::$(cat /tmp/ann.txt)"
+          grep -vE "Compiling|Downloading|Downloaded|Blocking" build-log.txt | tail -c 4500 | sed 's/%/%25/g' | awk '{printf "%s\\n", $0}' | head -c 3800 > /tmp/ann2.txt
+          echo "::error title=tauri build tail::$(cat /tmp/ann2.txt)"
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: ui/build-log.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
