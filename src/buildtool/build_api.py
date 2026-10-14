@@ -20,14 +20,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def target_triple() -> str:
     system = platform.system().lower()
+    # platform.machine() is "AMD64" on Windows and "arm64" on macOS; compare
+    # lowercased and normalize to Rust's triple naming (x86_64, aarch64).
     machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        arch = "x86_64"
+    elif machine in ("arm64", "aarch64"):
+        arch = "aarch64"
+    else:
+        arch = machine
     if system == "darwin":
-        arch = "aarch64" if machine == "arm64" else "x86_64"
         return f"{arch}-apple-darwin"
     if system == "windows":
-        arch = "x86_64" if machine == "AMD64" else machine
         return f"{arch}-pc-windows-msvc"
-    arch = "aarch64" if machine == "arm64" else "x86_64"
     return f"{arch}-unknown-linux-gnu"
 
 
