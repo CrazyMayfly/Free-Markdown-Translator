@@ -21,8 +21,34 @@
 - **翻译记忆**：相同段落（同源文、同语言、同模型、同风格）直接复用历史译文，零 LLM 调用
 - **断点续传**：`--resume` 从上次中断处继续，已完成的翻译包不再重复翻译
 - **异步并发与自动退避**：asyncio 单事件循环 + 全局并发信号量，限流 / 超时 / 5xx 指数退避并尊重 Retry-After
-- **MCP server 模式**：`mdtx --serve` 把翻译能力暴露为 MCP 工具，ZCode / Claude Desktop / Cursor 等 AI 客户端可直接调用
 - 端到端集成测试覆盖完整任务生命周期
+
+## 🔌 全新 MCP 集成：让 AI 客户端直接调用翻译能力
+
+一条命令把 mdtx 变成 MCP 服务器，ZCode / Claude Desktop / Cursor 等支持 MCP 的 AI 客户端即可在对话中直接调用翻译：
+
+```bash
+pip install "mdtx[mcp]"
+mdtx --serve
+```
+
+客户端配置示例：
+
+```json
+{
+  "mcpServers": {
+    "mdtx": {
+      "command": "mdtx",
+      "args": ["--serve"]
+    }
+  }
+}
+```
+
+暴露两个 MCP 工具：
+
+- `translate_markdown(path, target_langs, mode?, tone?, model?, write?)`：翻译 Markdown 文件，返回各语言译文、校验结果与 token 用量，翻译进度通过 MCP 进度通知实时上报
+- `evaluate_translation(path, target_lang)`：翻译并用 LLM-as-judge 按四维打分
 
 ## 📦 下载
 
