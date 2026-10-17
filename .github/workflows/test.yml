@@ -1,0 +1,80 @@
+name: Tests
+
+# Quality gate for every push to master and every pull request: backend
+# (pytest + ruff + mypy), frontend (vue-tsc + vite build) and the Tauri
+# shell (cargo check) run as parallel jobs. Release builds (release.yml)
+# additionally re-run the backend gate before publishing.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[ui,mcp,dev]"
+
+      - name: Ruff
+        run: ruff check src
+
+      - name: Mypy
+        run: mypy src
+
+      - name: Pytest
+        run: python -m pytest src/test -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck + build
+        # npm run build already runs vue-tsc --noEmit first; run both so the
+        # failure log names the stage that broke.
+        run: |
+          npm run typecheck
+          npm run build
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ui/src-tauri
+
+      - name: Cargo check
+        working-directory: ui/src-tauri
+        run: cargo check
