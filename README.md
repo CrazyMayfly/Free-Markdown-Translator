@@ -9,17 +9,171 @@ Free Markdown Translator 是一个基于 AI Agent 流水线的 Markdown 文档�
 ## 🚀 主要功能和特性
 
 - 使用 AI 驱动翻译流程以及AST语法树校验，可以保持**格式的稳定性**和**语意连贯性**
-- **反思式审校循环**：审校 Agent 先输出结构化批评意见（accuracy/fluency/terminology/style 分类 + 严重度分级），再针对性改进被标记的段落
+- **Structured Outputs 受限解码**：LLM 输出强制遵循 JSON Schema（端点不支持时自动降级），从根源上消灭格式错误与重试浪费
+- **反思式审校循环**：审校 Agent 先输出结构化批评意见（accuracy/fluency/terminology/style 分类 + 严重度分级），再针对性改进被标记的段落并复核修复结果，改进时携带相邻段落上下文
+- **文档级术语协调**：译前抽取术语表注入所有文本包，译后聚合各包的术语译法、检测漂移并自动改写不一致段落
 - **LLM-as-judge 质量评估**：`--eval` 按准确度/流畅度/术语/格式四维打分并输出评估报告
-- **翻译记忆**：相同段落（同源文、同语言、同模型、同风格）直接复用历史译文，零 LLM 调用；增量重译近乎免费
+- **翻译记忆**：相同段落（同源文、同语言、同模型、同风格、默认同文档）直接复用历史译文，零 LLM 调用；增量重译近乎免费
 - **断点续传**：`--resume` 从上次中断处继续，已完成的 bundle 不再重复翻译
+- **异步并发与自动退避**：asyncio 单事件循环 + 全局并发信号量；限流/超时/5xx 指数退避重试并尊重 Retry-After
 - **MCP server 模式**：`mdtx --serve` 把翻译能力暴露为 MCP 工具，ZCode/Claude Desktop/Cursor 等 AI 客户端可直接调用
 - 可以自定义语言风格，输入匹配，输出格式，支持不同的翻译模式（快速、平衡、严格）以适应不同需求
-- 内置 `TranslatorAgent`、`ReviewerAgent`、`FormatGuardAgent`，分别负责翻译、审校和格式修复（按翻译模式启用）
+- 内置 `TranslatorAgent`、`ReviewerAgent`、`GlossaryAgent`、`FormatGuardAgent`，分别负责翻译、审校、术语协调和格式修复（按翻译模式启用）
+- 支持 front matter、标题层级、列表、表格、代码块、链接等结构保护；文内锚点链接自动跟随译后标题
+- 分包边界对齐章节结构（标题处开新包、表格单元格不拆包），跨包携带文档大纲与前一包摘要，保证上下文连贯
+- 提供结构校验与输出报告，帮助发现格式漂移和内容异常
 - 兼容任意 OpenAI 兼容接口（OpenAI / OpenRouter / DeepSeek / Ollama / vLLM 等），可接入本地或第三方模型
 - 支持多目标语言、目录递归翻译、并行处理、文风约束和术语保留
 
-## 🖥️ 桌面应用
+## ⚡ Quick Start
+
+### 方式一：Clone 仓库后启动
+
+```bash
+git clone https://github.com/CrazyMayfly/Free-Markdown-Translator.git
+cd Free-Markdown-Translator
+pip install -r requirements.txt
+python src/cli/main.py --init-config 
+```
+
+也可以安装为本地命令（推荐，之后可直接使用 `mdtx`）：
+
+```bash
+pip install -e .
+mdtx --init-config
+```
+
+初始化后，默认配置文件会生成到：
+
+```text
+~/.mdtx/config.yaml
+```
+
+配置好 API Key 后即可开始翻译：
+
+```bash
+python src/cli/main.py README.md --to english,japanese
+```
+
+### 方式二：下载 exe 直接使用
+
+如果你使用的是 Windows，也可以下载已经打包好的 `mdtx.exe` 后直接运行。首次使用建议先初始化配置：
+
+```powershell
+.\mdtx.exe --init-config
+```
+
+然后编辑：
+
+```text
+~/.mdtx/config.yaml
+```
+
+配置完成后即可执行：
+
+```powershell
+.\mdtx.exe README.md --to Chinese
+```
+
+### 常用场景命令示例
+
+单文件翻译为中文：
+
+```bash
+.\mdtx.exe README.md --to Chinese
+```
+
+把整个 `doc` 目录递归翻译为英文和日文：
+
+```bash
+.\mdtx.exe doc --to english,japanese
+```
+
+指定输出目录：
+
+```bash
+.\mdtx.exe README.md --to Chinese --output translated
+```
+
+只匹配目录中指定文件名格式的 Markdown 文件 （使用正则匹配）：
+
+```bash
+.\mdtx.exe docs --to Chinese --match "*.md"
+```
+
+提高并行度，加快大批量翻译：
+
+```bash
+.\mdtx.exe docs --to Chinese --threads 10
+```
+
+开启更严格的翻译和校验流程，消耗更多token，花费更多时间但是获取更好的翻译效果：
+
+```bash
+.\mdtx.exe docs --to Chinese --mode strict
+```
+
+强制开启审校和格式保护：
+
+```bash
+.\mdtx.exe docs --to Chinese --review true --guard true
+```
+
+切换模型或文风：
+
+```bash
+.\mdtx.exe README.md --to Chinese --model gpt-5-mini --tone technical
+```
+
+输出详细日志，便于排查：
+
+```bash
+.\mdtx.exe --verbose README.md --to Chinese
+```
+
+翻译并做质量评估（LLM-as-judge 四维打分）：
+
+```bash
+.\mdtx.exe README.md --to Chinese --eval
+```
+
+从中断处续传（已完成的翻译包直接复用）：
+
+```bash
+.\mdtx.exe docs --to Chinese --resume
+```
+
+## 🤖 作为 MCP 工具供 AI 客户端调用
+
+安装 MCP 支持并以 stdio 方式启动服务：
+
+```bash
+pip install "mdtx[mcp]"
+mdtx --serve
+```
+
+在 ZCode / Claude Desktop / Cursor 等支持 MCP 的客户端中配置：
+
+```json
+{
+  "mcpServers": {
+    "mdtx": {
+      "command": "mdtx",
+      "args": ["--serve"]
+    }
+  }
+}
+```
+
+之后 AI 客户端即可调用两个工具：
+
+- `translate_markdown(path, target_langs, mode?, tone?, model?, write?)`：翻译 Markdown 文件，返回各语言的译文、校验结果与 token 用量，翻译进度通过 MCP 进度通知上报
+- `evaluate_translation(path, target_lang)`：翻译并用 LLM-as-judge 打分（准确度/流畅度/术语/格式）
+
+## 🖥️ 桌面应用（Tauri + Vue3）
+
+`mdtx` 附带一个本地桌面工作台：架构是 Tauri 2 壳 + Vue3 前端 + Python FastAPI sidecar（复用完整翻译管线），仅监听 `127.0.0.1`，不依赖任何云服务。
+
 ### 下载安装
 
 到 [Releases](https://github.com/CrazyMayfly/Free-Markdown-Translator/releases) 下载对应平台安装包（由 GitHub Actions 自动构建发布）：
@@ -78,6 +232,20 @@ cd ui && npx tauri build
 ### 发布流程
 
 三个平台的安装包由 GitHub Actions 自动构建：推送 `v*` 标签即触发（`.github/workflows/release.yml`），矩阵覆盖 macOS arm64 / Windows x64 / Ubuntu x64，构建产物自动挂到对应 Release。也可以在 Actions 页面手动触发 `workflow_dispatch` 只出产物不发布。
+
+## 🔌 兼容的模型服务
+
+任何 OpenAI 兼容的 chat 接口都可以通过 `base_url` 接入：
+
+| 服务 | base_url 示例 | 说明 |
+|------|--------------|------|
+| OpenAI | `https://api.openai.com/v1` | 默认；完整支持 Structured Outputs |
+| OpenRouter | `https://openrouter.ai/api/v1` | 聚合多家模型 |
+| DeepSeek | `https://api.deepseek.com/v1` | |
+| Ollama（本地） | `http://localhost:11434/v1` | 不支持 json_schema 时自动降级 |
+| vLLM（本地） | `http://localhost:8000/v1` | 同上 |
+
+`provider.name` 仅为标识，可填任意值；实际端点由 `base_url` 决定。配置 `structured_outputs: auto`（默认）时，端点不支持受限解码会自动回退到 `json_object` 模式。
 
 ## ⚙️ 配置说明
 
@@ -184,11 +352,27 @@ provider:
   model: your-model-name
 ```
 
+## 🔄 执行流程与机制
+
+1. `MarkdownParser` 先把源文档解析成 AST，识别 Markdown 结构
+2. `SegmentExtractor` 从 AST 中提取可翻译片段，并保护占位符、控制语法等敏感内容
+3. `DocumentContextBuilder` 生成文档摘要、标题大纲（heading_outline）、风格约束、术语上下文
+4. `GlossaryAgent` 译前抽取文档术语表（term → 译法），注入每个 bundle 的上下文，保证全文档术语一致
+5. `Orchestrator` 把 segment 组织成多个 bundle：优先在标题处对齐章节边界、同一表格的单元格不拆包，控制每次模型调用的大小
+6. **翻译记忆**查询：同一文档内完全相同的段落直接复用历史译文，跳过 LLM 调用（默认 `scope: document`，避免跨文档语境错配）
+7. `TranslatorAgent` 对每个 bundle 进行翻译（Structured Outputs 强约束输出格式，上下文含文档大纲、术语表与前一 bundle 摘要）
+8. `ReviewerAgent` 反思式审校：先输出结构化批评意见，再仅对达到严重度阈值的段落做针对性改进并复核（`fast` 关闭 / `balanced` medium 及以上 / `strict` 全量；修复时携带相邻段落上下文）
+9. **术语一致性 pass**：聚合各 bundle 上报的 `applied_terms`，检测同一术语的译法漂移，并按权威术语表自动改写受影响段落
+10. `MarkdownRenderer` 将翻译结果重新映射回 AST 并渲染为 Markdown；文内 `](#锚点)` 链接自动改指译后标题
+11. `MarkdownValidator` 校验 front matter 和整体结构
+12. 如果校验失败，`FormatGuardAgent` 会在需要时尝试修复格式问题
+13. 译文写入翻译记忆并更新断点状态，最终输出翻译后的 Markdown 和可选报告文件
+
 ## 🗂️ 项目结构
 
 ```text
 src/
-├─ agents/        Agent 定义与提示词，负责翻译、审校、评估、格式保护
+├─ agents/        Agent 定义与提示词，负责翻译、审校、评估、术语协调、格式保护
 ├─ api/           FastAPI 服务层：任务管理、SSE 进度、配置/记忆路由（UI 后端）
 ├─ cli/           命令行入口与参数处理
 ├─ core/          流水线、任务编排、核心数据结构

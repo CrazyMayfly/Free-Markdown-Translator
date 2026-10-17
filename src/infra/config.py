@@ -28,6 +28,9 @@ class ProviderConfig:
 class MemoryConfig:
     enabled: bool = True
     path: str = ".mdtx/memory.sqlite3"
+    # document: reuse entries only within the same document content (default,
+    # prevents context bleed across documents); global: reuse across documents.
+    scope: str = "document"
 
 
 @dataclass
@@ -39,12 +42,19 @@ class PipelineConfig:
     review_min_bundle_chars: int = 1600
     review_min_segments: int = 6
     review_confidence_threshold: float = 0.85
+    # Reflect->improve rounds per bundle; rounds > 1 re-verify every fix.
+    review_max_rounds: int = 2
+    # Document-level glossary extraction + post-translation harmonization.
+    enable_glossary: bool = True
 
 
 @dataclass
 class SegmentationConfig:
     max_bundle_chars: int = 6000
     max_bundle_segments: int = 12
+    # Start a new bundle at a heading once the current bundle reaches this
+    # many source characters, so bundle boundaries follow sections.
+    section_align_min_chars: int = 400
 
 
 @dataclass
@@ -153,10 +163,13 @@ def _default_config_dict() -> dict[str, Any]:
             "review_min_bundle_chars": 1600,
             "review_min_segments": 6,
             "review_confidence_threshold": 0.85,
+            "review_max_rounds": 2,
+            "enable_glossary": True,
         },
         "segmentation": {
             "max_bundle_chars": 6000,
             "max_bundle_segments": 12,
+            "section_align_min_chars": 400,
         },
         "input": {
             "file_pattern": "*.md",
@@ -181,6 +194,7 @@ def _default_config_dict() -> dict[str, Any]:
         "memory": {
             "enabled": True,
             "path": ".mdtx/memory.sqlite3",
+            "scope": "document",
         },
     }
 
@@ -227,11 +241,17 @@ pipeline:
   review_min_segments: 6
   # 翻译结果置信度低于该值时触发审校。
   review_confidence_threshold: 0.85
+  # 每个文本包的 反思->修复 轮数；大于 1 时每轮修复后会对修复过的段落复核一次。
+  review_max_rounds: 2
+  # 文档级术语表：译前抽取术语并在所有文本包间强制统一，译后自动修正不一致的译法。
+  enable_glossary: true
 
 # 分段策略。控制一次发送给模型的文本包大小。
 segmentation:
   max_bundle_chars: 6000
   max_bundle_segments: 12
+  # 当前文本包达到该字符数后，遇到标题即开新包，使分包边界对齐章节结构。
+  section_align_min_chars: 400
 
 # 输入规则。
 input:
@@ -270,6 +290,8 @@ memory:
   enabled: true
   # SQLite 记忆库路径。
   path: .mdtx/memory.sqlite3
+  # document = 仅在同一文档内复用（默认，避免跨文档语境错配）；global = 跨文档复用。
+  scope: document
 """
 
 

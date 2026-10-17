@@ -42,7 +42,16 @@ class TranslationMemory:
         self.misses = 0
 
     @staticmethod
-    def style_fingerprint(model: str, tone: str, audience: str, instructions: list[str], preserve_terms: list[str]) -> str:
+    def style_fingerprint(
+        model: str,
+        tone: str,
+        audience: str,
+        instructions: list[str],
+        preserve_terms: list[str],
+        document_id: str = "",
+    ) -> str:
+        # document_id is omitted from the payload when empty so "global" scope
+        # keeps producing the same keys as libraries written by older versions.
         payload = json.dumps(
             {
                 "model": model,
@@ -50,6 +59,7 @@ class TranslationMemory:
                 "audience": audience,
                 "instructions": list(instructions),
                 "preserve_terms": list(preserve_terms),
+                **({"document": document_id} if document_id else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -62,17 +72,22 @@ class TranslationMemory:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def find(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None:
+        row = self.peek(source_text, target_lang, fingerprint)
+        if row is None:
+            self.misses += 1
+            return None
+        self.hits += 1
+        return row
+
+    def peek(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None:
+        """Lookup without touching the hit/miss counters (used for planning)."""
         key = self.build_key(source_text, target_lang, fingerprint)
         with self._lock:
             row = self._conn.execute(
                 "SELECT translated_text FROM translation_entries WHERE entry_key = ?",
                 (key,),
             ).fetchone()
-        if row is None:
-            self.misses += 1
-            return None
-        self.hits += 1
-        return str(row[0])
+        return str(row[0]) if row is not None else None
 
     def store(self, source_text: str, target_lang: str, translated_text: str, fingerprint: str = "", confidence: float = 0.0) -> None:
         key = self.build_key(source_text, target_lang, fingerprint)
@@ -107,6 +122,9 @@ class NullMemory:
     """Drop-in replacement used when memory is disabled."""
 
     def find(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None:
+        return None
+
+    def peek(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None:
         return None
 
     def store(self, source_text: str, target_lang: str, translated_text: str, fingerprint: str = "", confidence: float = 0.0) -> None:

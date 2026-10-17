@@ -11,12 +11,13 @@ _SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3}
 
 
 class ReviewerAgent:
-    """Two-step reflection loop (translate -> critique -> improve).
+    """Reflect -> improve loop with re-verification of every fix.
 
-    Step 1 asks the model for structured critiques of the bundle; step 2 asks
-    it to improve only the segments whose issues are at or above min_severity.
-    min_severity routes by pipeline mode: strict improves everything ("low"),
-    balanced only acts on "high" severity issues.
+    Each round asks the model for structured critiques, improves only the
+    segments whose issues are at or above min_severity, then re-reflects on
+    exactly the segments that were just improved (rounds > 1) so a bad fix is
+    caught instead of shipped. The loop stops when a round finds no
+    qualifying issues.
     """
 
     def __init__(self, provider: LLMProvider | None = None) -> None:
@@ -28,17 +29,30 @@ class ReviewerAgent:
         translations: list[TranslationResult],
         context: DocumentContext,
         min_severity: str = "high",
+        max_rounds: int = 1,
     ) -> list[TranslationResult]:
         if self.provider is None:
             return translations
-        system_prompt, user_prompt = build_reflection_prompts(bundle, context, translations)
-        payload = self.provider.chat_json(
-            system_prompt,
-            user_prompt,
-            call_label="reflect",
-            response_schema=REFLECTION_RESPONSE_SCHEMA,
-        )
-        return self._improve_if_needed(bundle, context, translations, payload, min_severity)
+        current = list(translations)
+        scope_ids: set[str] | None = None
+        for _round in range(max(1, max_rounds)):
+            round_bundle, round_translations = self._restrict(bundle, current, scope_ids)
+            if not round_bundle.segments:
+                break
+            system_prompt, user_prompt = build_reflection_prompts(round_bundle, context, round_translations)
+            payload = self.provider.chat_json(
+                system_prompt,
+                user_prompt,
+                call_label="reflect",
+                response_schema=REFLECTION_RESPONSE_SCHEMA,
+            )
+            issues = self._qualifying_issues(payload, min_severity)
+            if not issues:
+                break
+            logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
+            current = self._improve(bundle, context, current, issues)
+            scope_ids = {str(issue.get("segment_id")) for issue in issues}
+        return current
 
     async def review_bundle_async(
         self,
@@ -46,30 +60,57 @@ class ReviewerAgent:
         translations: list[TranslationResult],
         context: DocumentContext,
         min_severity: str = "high",
+        max_rounds: int = 1,
     ) -> list[TranslationResult]:
         if self.provider is None:
             return translations
-        system_prompt, user_prompt = build_reflection_prompts(bundle, context, translations)
-        payload = await self.provider.chat_json_async(
-            system_prompt,
-            user_prompt,
-            call_label="reflect",
-            response_schema=REFLECTION_RESPONSE_SCHEMA,
-        )
-        return await self._improve_if_needed_async(bundle, context, translations, payload, min_severity)
+        current = list(translations)
+        scope_ids: set[str] | None = None
+        for _round in range(max(1, max_rounds)):
+            round_bundle, round_translations = self._restrict(bundle, current, scope_ids)
+            if not round_bundle.segments:
+                break
+            system_prompt, user_prompt = build_reflection_prompts(round_bundle, context, round_translations)
+            payload = await self.provider.chat_json_async(
+                system_prompt,
+                user_prompt,
+                call_label="reflect",
+                response_schema=REFLECTION_RESPONSE_SCHEMA,
+            )
+            issues = self._qualifying_issues(payload, min_severity)
+            if not issues:
+                break
+            logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
+            current = await self._improve_async(bundle, context, current, issues)
+            scope_ids = {str(issue.get("segment_id")) for issue in issues}
+        return current
 
-    def _improve_if_needed(
+    @staticmethod
+    def _restrict(
+        bundle: SegmentBundle,
+        translations: list[TranslationResult],
+        scope_ids: set[str] | None,
+    ) -> tuple[SegmentBundle, list[TranslationResult]]:
+        if scope_ids is None:
+            return bundle, translations
+        segments = [segment for segment in bundle.segments if segment.segment_id in scope_ids]
+        by_id = {item.segment_id: item for item in translations}
+        scoped = SegmentBundle(
+            bundle_id=bundle.bundle_id,
+            segments=segments,
+            summary_before=bundle.summary_before,
+            summary_after=bundle.summary_after,
+            style_instructions=bundle.style_instructions,
+        )
+        return scoped, [by_id[segment.segment_id] for segment in segments if segment.segment_id in by_id]
+
+    def _improve(
         self,
         bundle: SegmentBundle,
         context: DocumentContext,
         translations: list[TranslationResult],
-        reflection_payload: dict,
-        min_severity: str,
+        issues: list[dict],
     ) -> list[TranslationResult]:
-        issues = self._qualifying_issues(reflection_payload, min_severity)
-        if not issues:
-            return translations
-        logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
         system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
         payload = self.provider.chat_json(
             system_prompt,
@@ -79,18 +120,13 @@ class ReviewerAgent:
         )
         return self._merge_improvements(translations, issues, payload)
 
-    async def _improve_if_needed_async(
+    async def _improve_async(
         self,
         bundle: SegmentBundle,
         context: DocumentContext,
         translations: list[TranslationResult],
-        reflection_payload: dict,
-        min_severity: str,
+        issues: list[dict],
     ) -> list[TranslationResult]:
-        issues = self._qualifying_issues(reflection_payload, min_severity)
-        if not issues:
-            return translations
-        logging.info("Review flagged %s issue(s); improving affected segments", len(issues))
         system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
         payload = await self.provider.chat_json_async(
             system_prompt,

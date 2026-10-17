@@ -33,6 +33,28 @@ TRANSLATION_RESPONSE_SCHEMA = {
 
 REFLECTION_SCHEMA_NAME = "mdtx_reflection_response"
 
+GLOSSARY_SCHEMA_NAME = "mdtx_glossary_response"
+
+GLOSSARY_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "terms": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string"},
+                    "rendering": {"type": "string"},
+                },
+                "required": ["term", "rendering"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["terms"],
+    "additionalProperties": False,
+}
+
 REFLECTION_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {

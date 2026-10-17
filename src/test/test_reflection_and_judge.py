@@ -82,8 +82,9 @@ class ReflectionLoopTests(unittest.TestCase):
             input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
             result = pipeline.run(input_path, "zh-CN", write_output=False)
 
-        self.assertEqual(provider.calls.count("reflect"), 1)
-        self.assertEqual(provider.calls.count("improve"), 1)
+        # review_max_rounds=2: the fix from round 1 is re-verified in round 2.
+        self.assertEqual(provider.calls.count("reflect"), 2)
+        self.assertEqual(provider.calls.count("improve"), 2)
         self.assertIn("[IMPROVED]", result.translated_text)
         flagged_notes = [item for item in result.translations if any(note.startswith("review:") for note in item.notes)]
         self.assertTrue(flagged_notes)
@@ -110,7 +111,44 @@ class ReflectionLoopTests(unittest.TestCase):
             input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
             pipeline.run(input_path, "zh-CN", write_output=False)
 
-        self.assertEqual(provider.calls.count("improve"), 1)
+        # Round 1 improves; round 2 re-verifies the improved segment.
+        self.assertEqual(provider.calls.count("improve"), 2)
+
+    def test_medium_severity_issue_improved_in_balanced_mode(self) -> None:
+        provider = IssueFakeProvider(severity="medium")
+        pipeline = _build_pipeline(provider, _default_config("balanced"))
+        pipeline.config.pipeline.enable_review = True
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "README.md"
+            input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+            result = pipeline.run(input_path, "zh-CN", write_output=False)
+
+        # balanced acts on medium severity so terminology drift gets fixed.
+        self.assertGreaterEqual(provider.calls.count("improve"), 1)
+        self.assertIn("[IMPROVED]", result.translated_text)
+
+    def test_round_two_reflect_only_covers_improved_segments(self) -> None:
+        provider = IssueFakeProvider(severity="high")
+        provider.reflect_payloads = []
+        original_reflect = provider.chat_json
+
+        def record_and_reflect(system_prompt, user_prompt, call_label="llm", response_schema=None):
+            import json as _json
+
+            if _json.loads(user_prompt)["task"] == "reflect":
+                provider.reflect_payloads.append(_json.loads(user_prompt))
+            return original_reflect(system_prompt, user_prompt, call_label, response_schema)
+
+        provider.chat_json = record_and_reflect
+        pipeline = _build_pipeline(provider, _default_config("strict"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "README.md"
+            input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+            pipeline.run(input_path, "zh-CN", write_output=False)
+
+        self.assertEqual(len(provider.reflect_payloads), 2)
+        self.assertGreater(len(provider.reflect_payloads[0]["translations"]), 1)
+        self.assertEqual(len(provider.reflect_payloads[1]["translations"]), 1)
 
     def test_reflection_uses_structured_schemas(self) -> None:
         provider = IssueFakeProvider(severity="high")

@@ -148,6 +148,9 @@ class JobManager:
                     tone=config.style.tone,
                     audience=config.style.audience,
                     mode=config.pipeline.mode,
+                    max_bundle_chars=config.segmentation.max_bundle_chars,
+                    max_bundle_segments=config.segmentation.max_bundle_segments,
+                    section_align_min_chars=config.segmentation.section_align_min_chars,
                 ),
             )
         try:

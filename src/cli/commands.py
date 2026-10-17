@@ -11,6 +11,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from src.agents.format_guard_agent import FormatGuardAgent
+from src.agents.glossary_agent import GlossaryAgent
 from src.agents.judge_agent import JudgeAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
@@ -63,6 +64,7 @@ def build_pipeline(config: TranslatorConfig, memory: object | None = None, check
         validator=MarkdownValidator(),
         memory=memory,
         checkpoint_store=checkpoint_store,
+        glossary_agent=GlossaryAgent(provider),
     )
 
 
@@ -198,6 +200,9 @@ def _task_checkpoint_store(task: TranslationTask, config: TranslatorConfig, chec
         tone=config.style.tone,
         audience=config.style.audience,
         mode=config.pipeline.mode,
+        max_bundle_chars=config.segmentation.max_bundle_chars,
+        max_bundle_segments=config.segmentation.max_bundle_segments,
+        section_align_min_chars=config.segmentation.section_align_min_chars,
     )
     return JobCheckpointStore(checkpoint_dir, fingerprint)
 

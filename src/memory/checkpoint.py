@@ -76,6 +76,19 @@ class JobCheckpointStore:
             state_path.unlink(missing_ok=True)
 
     @staticmethod
-    def fingerprint(model: str, tone: str, audience: str, mode: str) -> str:
+    def fingerprint(
+        model: str,
+        tone: str,
+        audience: str,
+        mode: str,
+        max_bundle_chars: int | None = None,
+        max_bundle_segments: int | None = None,
+        section_align_min_chars: int | None = None,
+    ) -> str:
+        # Segmentation params are part of the key: they decide bundle
+        # boundaries, so a checkpoint written under different boundaries must
+        # not be resumed against newly built bundles.
         raw = f"{model}\x00{tone}\x00{audience}\x00{mode}"
+        if max_bundle_chars is not None:
+            raw += f"\x00seg\x00{max_bundle_chars}\x00{max_bundle_segments}\x00{section_align_min_chars}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

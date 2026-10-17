@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import re
+
 from src.core.types import DocumentContext, ParsedDocument, Segment
 from src.infra.config import TranslatorConfig
+
+_PLACEHOLDER_RE = re.compile(r"\{\{[A-Z_0-9]+\}\}")
+
+
+def _plain_heading_text(text: str) -> str:
+    return _PLACEHOLDER_RE.sub("", text).replace("`", "").strip()
 
 
 class DocumentContextBuilder:
@@ -10,6 +18,13 @@ class DocumentContextBuilder:
         if not title:
             title = next((" / ".join(segment.context_path) for segment in segments if segment.context_path), "")
         abstract = next((segment.source_text for segment in segments if segment.node_type == "paragraph"), "")
+        heading_outline = [
+            plain
+            for segment in segments
+            if segment.node_type == "heading"
+            for plain in [_plain_heading_text(segment.source_text)]
+            if plain
+        ]
         section_summaries: dict[str, str] = {}
         for segment in segments:
             if not segment.context_path:
@@ -26,4 +41,5 @@ class DocumentContextBuilder:
             section_summaries=section_summaries,
             style_guide=style_guide,
             audience=config.style.audience,
+            heading_outline=heading_outline,
         )

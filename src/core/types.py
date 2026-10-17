@@ -117,6 +117,10 @@ class DocumentContext:
     section_summaries: dict[str, str]
     style_guide: list[str]
     audience: str
+    # Document map shared by every bundle: all headings in document order and
+    # the authoritative term -> rendering glossary for this run.
+    heading_outline: list[str] = field(default_factory=list)
+    glossary: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
