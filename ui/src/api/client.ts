@@ -82,8 +82,17 @@ export interface AppConfig {
     enable_review: boolean;
     enable_format_guard: boolean;
     fail_on_validation_error: boolean;
+    review_max_rounds: number;
+    enable_glossary: boolean;
+    enable_sentinels: boolean;
+    enable_anchor_scheduling: boolean;
+    enable_context_pull: boolean;
+    enable_final_edit: boolean;
+    final_edit_max_segments: number;
+    reviewer_model: string;
+    judge_model: string;
   };
-  segmentation: { max_bundle_chars: number; max_bundle_segments: number };
+  segmentation: { max_bundle_chars: number; max_bundle_segments: number; section_align_min_chars: number };
   input: { file_pattern: string };
   style: {
     tone: string;
@@ -93,7 +102,22 @@ export interface AppConfig {
   };
   output: { directory: string; file_suffix_template: string; write_report: boolean };
   execution: { max_parallel_translations: number };
-  memory: { enabled: boolean; path: string };
+  memory: {
+    enabled: boolean;
+    path: string;
+    scope: string;
+    fuzzy_examples: boolean;
+    reuse_min_confidence: number;
+    glossary_persist: boolean;
+    glossary_path: string;
+  };
+}
+
+export interface GlossaryEntry {
+  term: string;
+  rendering: string;
+  origin: string;
+  updated_at: string;
 }
 
 export interface JobParams {
@@ -218,6 +242,17 @@ export const api = {
     }),
   memoryStats: () => request<{ hits: number; misses: number; entries: number }>("/api/memory/stats"),
   clearMemory: () => request<{ removed: number }>("/api/memory", { method: "DELETE" }),
+  glossaryList: (lang = "") => request<{ entries: Record<string, GlossaryEntry[]> }>(`/api/glossary?lang=${encodeURIComponent(lang)}`),
+  glossaryUpsert: (lang: string, term: string, rendering: string) =>
+    request<{ lang: string; term: string; rendering: string }>("/api/glossary", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lang, term, rendering }),
+    }),
+  glossaryDelete: (lang: string, term: string) =>
+    request<{ deleted: boolean }>(`/api/glossary?lang=${encodeURIComponent(lang)}&term=${encodeURIComponent(term)}`, {
+      method: "DELETE",
+    }),
   listCheckpoints: () =>
     request<{ file: string; fingerprint: string; bundles: number }[]>("/api/checkpoints"),
 };
