@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mdtx"
-version = "3.0.0"
+version = "3.1.0"
 description = "Agent-based Markdown translation pipeline with AST validation and placeholder protection."
 readme = "README.md"
 license = { file = "LICENSE" }
