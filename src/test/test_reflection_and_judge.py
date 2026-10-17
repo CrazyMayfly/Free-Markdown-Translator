@@ -199,12 +199,15 @@ class JudgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "README.md"
             input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
+            config = TranslatorConfig()
+            # Keep the command from touching a real memory db during the test.
+            config.memory.enabled = False
             with patch("src.cli.commands.build_pipeline", return_value=FakePipeline()), patch(
                 "src.cli.commands._build_provider", return_value=provider
             ):
                 buffer = io.StringIO()
                 with redirect_stdout(buffer):
-                    exit_code = evaluate_command(str(input_path), "zh-CN", TranslatorConfig())
+                    exit_code = evaluate_command(str(input_path), "zh-CN", config)
 
         self.assertEqual(exit_code, 0)
         printed = json.loads(buffer.getvalue())

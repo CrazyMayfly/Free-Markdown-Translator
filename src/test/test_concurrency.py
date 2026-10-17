@@ -78,6 +78,9 @@ class _SemaphoreTests(unittest.TestCase):
         config.pipeline.enable_review = False
         config.pipeline.enable_format_guard = False
         config.pipeline.fail_on_validation_error = True
+        # Isolate the semaphore behaviour: anchor scheduling would serialize
+        # every section-starting bundle by design.
+        config.pipeline.enable_anchor_scheduling = False
         config.execution.max_parallel_translations = parallel
         return config
 

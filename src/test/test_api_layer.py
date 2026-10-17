@@ -260,6 +260,22 @@ class ConfigRouteTests(unittest.TestCase):
                 data = (await client.get("/api/config")).json()
             self.assertEqual(data["config"]["provider"]["api_key"], API_KEY_MASK)
             self.assertNotIn("sk-secret-value", json.dumps(data))
+            # Every PipelineConfig toggle the ConfigView renders must be
+            # present, or the form silently shows unchecked boxes.
+            pipeline = data["config"]["pipeline"]
+            for key in (
+                "enable_glossary",
+                "enable_sentinels",
+                "enable_anchor_scheduling",
+                "enable_context_pull",
+                "enable_final_edit",
+            ):
+                self.assertIn(key, pipeline)
+                self.assertTrue(pipeline[key])
+            self.assertIn("reviewer_model", pipeline)
+            self.assertIn("judge_model", pipeline)
+            self.assertIn("section_align_min_chars", data["config"]["segmentation"])
+            self.assertIn("scope", data["config"]["memory"])
 
         self._run(scenario())
 

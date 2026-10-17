@@ -43,6 +43,10 @@ class FakeProvider(LLMProvider):
         self.calls: list[str] = []
         self.schemas: list[dict | None] = []
 
+    @property
+    def model(self) -> str:
+        return "fake-model"
+
     def get_usage_summary(self):
         from src.core.types import ApiUsageSummary
 
@@ -81,6 +85,7 @@ class FakeProvider(LLMProvider):
                 "scores": {"accuracy": 5.0, "fluency": 4.0, "terminology": 4.5, "format": 5.0},
                 "overall": 4.5,
                 "comments": [],
+                "weak_segments": [],
             }
         if task in {"review", "improve", "format_guard", "harmonize"}:
             items = payload["translations"]
