@@ -8,22 +8,18 @@ Free Markdown Translator 是一个基于 AI Agent 流水线的 Markdown 文档�
 
 ## 🚀 主要功能和特性
 
-- 使用 AI 驱动翻译流程以及AST语法树校验，可以保持**格式的稳定性**和**语意连贯性**
-- **Structured Outputs 受限解码**：LLM 输出强制遵循 JSON Schema（端点不支持时自动降级），从根源上消灭格式错误与重试浪费
-- **反思式审校循环**：审校 Agent 先输出结构化批评意见（accuracy/fluency/terminology/style 分类 + 严重度分级），再针对性改进被标记的段落并复核修复结果，改进时携带相邻段落上下文
-- **文档级术语协调**：译前抽取术语表注入所有文本包，译后聚合各包的术语译法、检测漂移并自动改写不一致段落
-- **LLM-as-judge 质量评估**：`--eval` 按准确度/流畅度/术语/格式四维打分并输出评估报告
-- **翻译记忆**：相同段落（同源文、同语言、同模型、同风格、默认同文档）直接复用历史译文，零 LLM 调用；增量重译近乎免费
-- **断点续传**：`--resume` 从上次中断处继续，已完成的 bundle 不再重复翻译
-- **异步并发与自动退避**：asyncio 单事件循环 + 全局并发信号量；限流/超时/5xx 指数退避重试并尊重 Retry-After
-- **MCP server 模式**：`mdtx --serve` 把翻译能力暴露为 MCP 工具，ZCode/Claude Desktop/Cursor 等 AI 客户端可直接调用
-- 可以自定义语言风格，输入匹配，输出格式，支持不同的翻译模式（快速、平衡、严格）以适应不同需求
-- 内置 `TranslatorAgent`、`ReviewerAgent`、`GlossaryAgent`、`FormatGuardAgent`，分别负责翻译、审校、术语协调和格式修复（按翻译模式启用）
-- 支持 front matter、标题层级、列表、表格、代码块、链接等结构保护；文内锚点链接自动跟随译后标题
-- 分包边界对齐章节结构（标题处开新包、表格单元格不拆包），跨包携带文档大纲与前一包摘要，保证上下文连贯
-- 提供结构校验与输出报告，帮助发现格式漂移和内容异常
-- 兼容任意 OpenAI 兼容接口（OpenAI / OpenRouter / DeepSeek / Ollama / vLLM 等），可接入本地或第三方模型
-- 支持多目标语言、目录递归翻译、并行处理、文风约束和术语保留
+AI Agent 流水线翻译 + AST 语法树校验：**格式稳定、语义连贯、成本可控**。核心能力按领域归纳如下（详细机制见[执行流程](#-执行流程与机制)）：
+
+| 领域 | 能力 |
+| --- | --- |
+| 🈯️ 术语一致 | 译前抽取术语表、译后自动修正漂移译法；持久化术语库跨运行累积，人工条目优先于模型投票（API `/api/glossary` 可管理） |
+| 🔗 上下文连贯 | 分包对齐章节边界（表格不拆包）；每包携带文档大纲、术语表与前一包摘要；锚点调度为并行包注入真实已译文本；翻译模型可**主动请求更深的记忆检索**（拉取式上下文）；文内锚点链接自动跟随译后标题 |
+| ✅ 质量保障 | 反思式审校（批评 → 修复 → 复核）；零成本语义哨兵（占位符/数字守恒、长度比）拦截丢内容；strict 模式**文档级终审**（跨章节指代/衔接/语气漂移）；`--eval` LLM-as-judge 打分并把弱段移出记忆；`--regression` 黄金样例回归 |
+| 💰 成本效率 | 翻译记忆：相同段落零调用复用、相似段落模糊复用或作 few-shot 示例；`--resume` 断点续传；asyncio 并发 + 限流退避 |
+| 🧱 结构稳定 | Structured Outputs 受限解码（端点不支持自动降级）、截断精确识别；代码/URL/表格/标题占位符保护；校验失败自动格式修复 |
+| 🔌 灵活集成 | 任意 OpenAI 兼容端点（OpenRouter / DeepSeek / Ollama / vLLM…）；审校与评审可配置独立模型；`--serve` MCP 模式接入 AI 客户端；桌面应用 + Web UI |
+
+其他：多目标语言、目录递归翻译、文风与保留术语自定义、快速/平衡/严格三档模式。
 
 ## ⚡ Quick Start
 
@@ -357,16 +353,19 @@ provider:
 1. `MarkdownParser` 先把源文档解析成 AST，识别 Markdown 结构
 2. `SegmentExtractor` 从 AST 中提取可翻译片段，并保护占位符、控制语法等敏感内容
 3. `DocumentContextBuilder` 生成文档摘要、标题大纲（heading_outline）、风格约束、术语上下文
-4. `GlossaryAgent` 译前抽取文档术语表（term → 译法），注入每个 bundle 的上下文，保证全文档术语一致
+4. `GlossaryAgent` 译前抽取文档术语表（term → 译法），与持久化术语库、preserve_terms 合并后注入每个 bundle 的上下文
 5. `Orchestrator` 把 segment 组织成多个 bundle：优先在标题处对齐章节边界、同一表格的单元格不拆包，控制每次模型调用的大小
-6. **翻译记忆**查询：同一文档内完全相同的段落直接复用历史译文，跳过 LLM 调用（默认 `scope: document`，避免跨文档语境错配）
-7. `TranslatorAgent` 对每个 bundle 进行翻译（Structured Outputs 强约束输出格式，上下文含文档大纲、术语表与前一 bundle 摘要）
-8. `ReviewerAgent` 反思式审校：先输出结构化批评意见，再仅对达到严重度阈值的段落做针对性改进并复核（`fast` 关闭 / `balanced` medium 及以上 / `strict` 全量；修复时携带相邻段落上下文）
-9. **术语一致性 pass**：聚合各 bundle 上报的 `applied_terms`，检测同一术语的译法漂移，并按权威术语表自动改写受影响段落
-10. `MarkdownRenderer` 将翻译结果重新映射回 AST 并渲染为 Markdown；文内 `](#锚点)` 链接自动改指译后标题
-11. `MarkdownValidator` 校验 front matter 和整体结构
-12. 如果校验失败，`FormatGuardAgent` 会在需要时尝试修复格式问题
-13. 译文写入翻译记忆并更新断点状态，最终输出翻译后的 Markdown 和可选报告文件
+6. **翻译记忆**查询：同一文档内完全相同的段落直接复用；高度相似的历史段落模糊复用；较相似的作为 few-shot 示例注入（置信度低于阈值的条目不复用）
+7. **锚点-并行混合调度**：每章首个 bundle 先按文档顺序串行翻译，其余 bundle 并行执行并携带锚点 bundle 的真实已译文本
+8. `TranslatorAgent` 对每个 bundle 进行翻译（Structured Outputs 强约束输出格式，上下文含文档大纲、术语表、前一 bundle 摘要、锚点译文与相似段落示例）；模型对看不准的段落可返回 `context_requests`，管线做更深的记忆检索后重译一轮（拉取式上下文，fast 模式关闭）
+9. **确定性语义哨兵**：占位符/数字守恒与长度比检查，发现丢内容/幻觉即强制审校该 bundle 并记录到输出报告
+10. `ReviewerAgent` 反思式审校：先输出结构化批评意见，再仅对达到严重度阈值的段落做针对性改进并复核（`fast` 关闭 / `balanced` medium 及以上 / `strict` 全量；修复时携带相邻段落上下文）
+11. **术语一致性 pass**：聚合各 bundle 上报的 `applied_terms`，检测同一术语的译法漂移，按权威术语表自动改写受影响段落并回写持久化术语库
+12. **文档级终审**（`strict` 模式）：`EditorAgent` 以全文为审阅单元检查跨包话语流（指代悬空、衔接生硬、术语/语气漂移），仅修正被标记段落且携带文档序邻居上下文
+13. `MarkdownRenderer` 将翻译结果重新映射回 AST 并渲染为 Markdown；文内 `](#锚点)` 链接自动改指译后标题
+14. `MarkdownValidator` 校验 front matter 和整体结构
+15. 如果校验失败，`FormatGuardAgent` 会并发尝试修复格式问题
+16. 译文写入翻译记忆并更新断点状态，最终输出翻译后的 Markdown 和可选报告文件
 
 ## 🗂️ 项目结构
 
