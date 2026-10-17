@@ -2,6 +2,12 @@ class TranslationPipelineError(Exception):
     """Raised when the translation pipeline cannot produce a valid output."""
 
 
+class LLMResponseTruncatedError(TranslationPipelineError):
+    """The model response was cut off by max_tokens before completing valid
+    JSON. Retrying with the same prompt cannot fix this; the caller must
+    raise provider.max_tokens or shrink segmentation.max_bundle_chars."""
+
+
 class OutputWriteError(TranslationPipelineError):
     """The translation finished but writing the output file failed.
 

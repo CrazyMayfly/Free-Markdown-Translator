@@ -4,15 +4,17 @@ import asyncio
 import copy
 import json
 import logging
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from tqdm import tqdm
 
+from src.agents.editor_agent import EditorAgent
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.glossary_agent import GlossaryAgent
-from src.agents.judge_agent import JudgeAgent
+from src.agents.judge_agent import JudgeAgent, apply_judge_feedback
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
 from src.core.orchestrator import Orchestrator
@@ -23,28 +25,30 @@ from src.infra.logging import log_success, log_task_context
 from src.llm.client import AsyncOpenAIProvider
 from src.memory.checkpoint import JobCheckpointStore
 from src.memory.document_context import DocumentContextBuilder
+from src.memory.glossary_store import build_glossary_store
 from src.memory.translation_memory import build_memory
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
 from src.validators.markdown_validator import MarkdownValidator
 
 
-def _build_provider(config: TranslatorConfig):
+def _build_provider(config: TranslatorConfig, model: str | None = None):
     # Any provider name is accepted: every endpoint speaks the OpenAI-compatible
     # chat API and is selected purely by base_url (OpenAI, OpenRouter, DeepSeek,
-    # Ollama, vLLM, ...).
-    if config.provider.name != "openai":
+    # Ollama, vLLM, ...). model=None uses the configured translator model.
+    resolved_model = model or config.provider.model
+    if config.provider.name != "openai" or model:
         logging.info(
             "Provider %s: using OpenAI-compatible endpoint %s (model=%s)",
             config.provider.name,
             config.provider.base_url,
-            config.provider.model,
+            resolved_model,
         )
     return AsyncOpenAIProvider(
         base_url=config.provider.base_url,
         api_key=config.provider.api_key,
         api_key_env=config.provider.api_key_env,
-        model=config.provider.model,
+        model=resolved_model,
         temperature=config.provider.temperature,
         max_tokens=config.provider.max_tokens,
         structured_outputs=config.provider.structured_outputs,
@@ -54,17 +58,24 @@ def _build_provider(config: TranslatorConfig):
 
 def build_pipeline(config: TranslatorConfig, memory: MemoryStore | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
     provider = _build_provider(config)
+    reviewer_provider = provider
+    if config.pipeline.reviewer_model:
+        # A dedicated review model breaks the same-model self-review bias;
+        # the document-level editor rides on the same selection.
+        reviewer_provider = _build_provider(config, config.pipeline.reviewer_model)
     return TranslationPipeline(
         config=config,
         parser=MarkdownParser(),
         extractor=SegmentExtractor(),
         translator_agent=TranslatorAgent(provider),
-        reviewer_agent=ReviewerAgent(provider if config.pipeline.enable_review else None),
+        reviewer_agent=ReviewerAgent(reviewer_provider if config.pipeline.enable_review else None),
         format_guard_agent=FormatGuardAgent(provider if config.pipeline.enable_format_guard else None),
         validator=MarkdownValidator(),
         memory=memory,
         checkpoint_store=checkpoint_store,
         glossary_agent=GlossaryAgent(provider),
+        glossary_store=build_glossary_store(config),
+        editor_agent=EditorAgent(reviewer_provider),
     )
 
 
@@ -406,12 +417,61 @@ def report_command(path: str, target_lang: str, config: TranslatorConfig) -> int
 
 
 def evaluate_command(path: str, target_lang: str, config: TranslatorConfig) -> int:
-    """Translate one file and print an LLM-as-judge quality report."""
-    pipeline = build_pipeline(config)
+    """Translate one file and print an LLM-as-judge quality report.
+
+    Judge-flagged weak segments are downweighted in the translation memory so
+    a bad rendering is not served again on the next run.
+    """
+    memory = build_memory(config)
+    pipeline = build_pipeline(config, memory=memory)
     result = asyncio.run(pipeline.run_async(Path(path), target_lang, write_output=False))
-    judge = JudgeAgent(_build_provider(config))
+    judge = JudgeAgent(_build_provider(config, model=config.pipeline.judge_model or None))
     judge_report = asyncio.run(judge.evaluate_async(result.segments, result.translations, result.context, target_lang))
     judge_report["input_path"] = str(path)
+    judge_report["validation_passed"] = result.validation.passed
+    judge_report["api_usage"] = {
+        "prompt_tokens": result.api_usage.total.prompt_tokens,
+        "completion_tokens": result.api_usage.total.completion_tokens,
+        "total_tokens": result.api_usage.total.total_tokens,
+        "calls": result.api_usage.total.call_count,
+    }
+    weak_segments = judge_report.get("weak_segments") or []
+    if weak_segments:
+        fingerprint = pipeline.memory_fingerprint_for(Path(path).read_text(encoding="utf-8"))
+        downweighted = apply_judge_feedback(memory, fingerprint, target_lang, result.segments, weak_segments)
+        judge_report["memory_downweighted"] = downweighted
+        logging.info("Judge feedback: downweighted %s weak segment(s) in memory", downweighted)
+    print(json.dumps(judge_report, ensure_ascii=False, indent=2))
+    return 0 if judge_report["overall"] >= 3.0 else 1
+
+
+def regression_command(golden_path: str, config: TranslatorConfig) -> int:
+    """Quality regression check against a golden set.
+
+    The golden file holds curated segments; they are translated with the
+    current pipeline and judged against reference renderings, so prompt or
+    model changes get a measurable before/after signal.
+    """
+    golden = json.loads(Path(golden_path).read_text(encoding="utf-8"))
+    items = golden.get("items") if isinstance(golden, dict) else golden
+    if not items:
+        raise ValueError(f"Golden set {golden_path} has no items")
+    target_lang = (config.target_languages or ["english"])[0]
+    sources = [str(item["source"]) for item in items]
+    references = {f"body-{index}": str(item["reference"]) for index, item in enumerate(items)}
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = Path(temp_dir) / "golden.md"
+        input_path.write_text("\n\n".join(sources) + "\n", encoding="utf-8")
+        pipeline = build_pipeline(config)
+        result = asyncio.run(pipeline.run_async(input_path, target_lang, write_output=False))
+        judge = JudgeAgent(_build_provider(config, model=config.pipeline.judge_model or None))
+        judge_report = asyncio.run(
+            judge.evaluate_async(result.segments, result.translations, result.context, target_lang, reference=references)
+        )
+
+    judge_report["golden_path"] = str(golden_path)
+    judge_report["segments"] = len(items)
     judge_report["validation_passed"] = result.validation.passed
     judge_report["api_usage"] = {
         "prompt_tokens": result.api_usage.total.prompt_tokens,

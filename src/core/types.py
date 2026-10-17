@@ -8,11 +8,23 @@ from typing import Any, Protocol
 class MemoryStore(Protocol):
     """Translation memory interface shared by TranslationMemory and NullMemory."""
 
-    def find(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None: ...
+    def find(self, source_text: str, target_lang: str, fingerprint: str = "", min_confidence: float = 0.0) -> str | None: ...
 
-    def peek(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None: ...
+    def peek(self, source_text: str, target_lang: str, fingerprint: str = "", min_confidence: float = 0.0) -> str | None: ...
 
-    def store(self, source_text: str, target_lang: str, translated_text: str, fingerprint: str = "", confidence: float = 0.0) -> None: ...
+    def store(
+        self,
+        source_text: str,
+        target_lang: str,
+        translated_text: str,
+        fingerprint: str = "",
+        confidence: float = 0.0,
+        style_key: str = "",
+    ) -> None: ...
+
+    def find_similar(self, source_text: str, target_lang: str, style_key: str = "", limit: int = 2, min_score: float = 0.0) -> list[tuple[float, str, str]]: ...
+
+    def downweight(self, source_text: str, target_lang: str, fingerprint: str, confidence: float = 0.0) -> bool: ...
 
     def stats(self) -> dict[str, int]: ...
 
@@ -103,6 +115,12 @@ class SegmentBundle:
     summary_before: str
     summary_after: str
     style_instructions: list[str]
+    # Fuzzy translation-memory neighbours: segment_id -> [{source, translation}]
+    # prior renderings of similar source text, injected as few-shot examples.
+    similar_examples: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    # Already-translated segments that open this bundle's section (from the
+    # section's anchor bundle): real target-language context for continuity.
+    anchor_translations: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -112,6 +130,19 @@ class TranslationResult:
     notes: list[str] = field(default_factory=list)
     applied_terms: dict[str, str] = field(default_factory=dict)
     confidence: float = 0.0
+
+
+@dataclass
+class TranslationOutcome:
+    """Translator output plus optional pull-style context requests.
+
+    context_requests is the model asking for more context it could not see
+    (e.g. deeper translation-memory search for a specific segment); the
+    pipeline answers the request and translates once more.
+    """
+
+    translations: list[TranslationResult] = field(default_factory=list)
+    context_requests: list[dict] = field(default_factory=list)
 
 
 @dataclass

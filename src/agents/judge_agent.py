@@ -73,4 +73,24 @@ class JudgeAgent:
             "scores": scores,
             "overall": float(payload.get("overall", 0.0)),
             "comments": list(payload.get("comments", [])),
+            "weak_segments": [str(item) for item in payload.get("weak_segments", [])],
         }
+
+
+def apply_judge_feedback(memory, fingerprint: str, target_lang: str, segments: list[Segment], weak_segment_ids: list[str]) -> int:
+    """Downweight translation-memory entries the judge flagged as weak.
+
+    Downweighted entries fall below memory.reuse_min_confidence and stop
+    being reused, so a bad translation is not served twice.
+    """
+    if not weak_segment_ids:
+        return 0
+    segment_by_id = {segment.segment_id: segment for segment in segments}
+    downweighted = 0
+    for segment_id in weak_segment_ids:
+        segment = segment_by_id.get(segment_id)
+        if segment is None:
+            continue
+        if memory.downweight(segment.source_text, target_lang, fingerprint, confidence=0.0):
+            downweighted += 1
+    return downweighted

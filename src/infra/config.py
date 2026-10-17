@@ -31,6 +31,17 @@ class MemoryConfig:
     # document: reuse entries only within the same document content (default,
     # prevents context bleed across documents); global: reuse across documents.
     scope: str = "document"
+    # Fuzzy matching over stored entries: near-identical sources are reused
+    # directly, close matches are injected as few-shot examples.
+    fuzzy_examples: bool = True
+    fuzzy_reuse_threshold: float = 0.97
+    fuzzy_example_threshold: float = 0.70
+    # Stored entries below this confidence are never reused (judge feedback
+    # downweights weak segments to 0).
+    reuse_min_confidence: float = 0.3
+    # Persistent glossary accumulated across runs (human entries win).
+    glossary_persist: bool = True
+    glossary_path: str = ".mdtx/glossary.sqlite3"
 
 
 @dataclass
@@ -46,6 +57,23 @@ class PipelineConfig:
     review_max_rounds: int = 2
     # Document-level glossary extraction + post-translation harmonization.
     enable_glossary: bool = True
+    # Deterministic semantic sentinels (placeholder/number parity, length
+    # ratio); findings force a review of the affected bundle.
+    enable_sentinels: bool = True
+    sentinel_min_length_ratio: float = 0.35
+    sentinel_max_length_ratio: float = 3.0
+    # Translate each section's first bundle sequentially (anchor), then run
+    # the rest in parallel carrying the anchor's real translations.
+    enable_anchor_scheduling: bool = True
+    # Optional separate models for review/judging (breaks self-review bias).
+    reviewer_model: str = ""
+    judge_model: str = ""
+    # Pull-style context: the translator may request deeper translation-memory
+    # search for specific segments; the bundle is then translated once more.
+    enable_context_pull: bool = True
+    # Document-level final edit (cross-bundle discourse review) in strict mode.
+    enable_final_edit: bool = True
+    final_edit_max_segments: int = 300
 
 
 @dataclass
@@ -165,6 +193,15 @@ def _default_config_dict() -> dict[str, Any]:
             "review_confidence_threshold": 0.85,
             "review_max_rounds": 2,
             "enable_glossary": True,
+            "enable_sentinels": True,
+            "sentinel_min_length_ratio": 0.35,
+            "sentinel_max_length_ratio": 3.0,
+            "enable_anchor_scheduling": True,
+            "reviewer_model": "",
+            "judge_model": "",
+            "enable_context_pull": True,
+            "enable_final_edit": True,
+            "final_edit_max_segments": 300,
         },
         "segmentation": {
             "max_bundle_chars": 6000,
@@ -195,6 +232,12 @@ def _default_config_dict() -> dict[str, Any]:
             "enabled": True,
             "path": ".mdtx/memory.sqlite3",
             "scope": "document",
+            "fuzzy_examples": True,
+            "fuzzy_reuse_threshold": 0.97,
+            "fuzzy_example_threshold": 0.70,
+            "reuse_min_confidence": 0.3,
+            "glossary_persist": True,
+            "glossary_path": ".mdtx/glossary.sqlite3",
         },
     }
 
@@ -245,6 +288,22 @@ pipeline:
   review_max_rounds: 2
   # 文档级术语表：译前抽取术语并在所有文本包间强制统一，译后自动修正不一致的译法。
   enable_glossary: true
+  # 确定性语义哨兵：占位符/数字守恒与长度比检查，命中即强制审校该文本包（零 LLM 成本）。
+  enable_sentinels: true
+  # 哨兵长度比上下限（译文/源文字符数）。
+  sentinel_min_length_ratio: 0.35
+  sentinel_max_length_ratio: 3.0
+  # 锚点-并行混合调度：每章首个文本包先串行翻译（锚点），其余并行并携带锚点已译文本。
+  enable_anchor_scheduling: true
+  # 审校/评审可选用不同模型（留空 = 与翻译同模型），避免自我审校偏好。
+  reviewer_model: ""
+  judge_model: ""
+  # 上下文按需拉取：翻译模型可请求对特定段落做更深的翻译记忆检索，随后重译该文本包。
+  enable_context_pull: true
+  # 文档级终审（strict 模式）：跨文本包审阅指代/衔接/术语一致性并修正（final_edit 调用）。
+  enable_final_edit: true
+  # 终审最多覆盖的段落数（控制成本）。
+  final_edit_max_segments: 300
 
 # 分段策略。控制一次发送给模型的文本包大小。
 segmentation:
@@ -292,6 +351,17 @@ memory:
   path: .mdtx/memory.sqlite3
   # document = 仅在同一文档内复用（默认，避免跨文档语境错配）；global = 跨文档复用。
   scope: document
+  # 模糊匹配：源文高度相似的历史条目直接复用；较相似的作为 few-shot 示例注入 prompt。
+  fuzzy_examples: true
+  # 相似度达到该值直接复用（0-1，字符三元组 Jaccard）。
+  fuzzy_reuse_threshold: 0.97
+  # 相似度达到该值作为 few-shot 示例注入。
+  fuzzy_example_threshold: 0.70
+  # 记忆条目置信度低于该值时不复用（judge 弱段会被降权到 0）。
+  reuse_min_confidence: 0.3
+  # 持久化术语表：跨运行累积，人工条目（origin=user）永远优先于模型投票。
+  glossary_persist: true
+  glossary_path: .mdtx/glossary.sqlite3
 """
 
 

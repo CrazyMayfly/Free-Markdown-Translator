@@ -8,6 +8,7 @@ import time
 
 from openai import AsyncOpenAI, BadRequestError, OpenAI
 
+from src.core.errors import LLMResponseTruncatedError
 from src.core.types import ApiUsageSummary
 from src.llm.provider import LLMProvider
 
@@ -69,18 +70,30 @@ def _log_call_start(call_label: str, model: str, system_prompt: str, user_prompt
         logging.debug("Model input [user] (%s):\n%s", call_label, user_prompt)
 
 
-def _log_call_done(call_label: str, elapsed_ms: int, content: str, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+def _log_call_done(call_label: str, elapsed_ms: int, content: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, cached_tokens: int = 0) -> None:
     logging.info(
-        "LLM done: %s %sms chars=%s tokens=%s/%s/%s",
+        "LLM done: %s %sms chars=%s tokens=%s/%s/%s cached=%s",
         call_label,
         elapsed_ms,
         len(content),
         prompt_tokens,
         completion_tokens,
         total_tokens,
+        cached_tokens,
     )
     if logging.getLogger().isEnabledFor(logging.DEBUG):
         logging.debug("Model output [raw] (%s):\n%s", call_label, content)
+
+
+def _check_truncation(response, call_label: str, max_tokens: int) -> None:
+    finish_reason = None
+    if getattr(response, "choices", None):
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+    if finish_reason == "length":
+        raise LLMResponseTruncatedError(
+            f"LLM response for '{call_label}' was truncated by max_tokens={max_tokens} "
+            "before completing valid JSON; increase provider.max_tokens or reduce segmentation.max_bundle_chars"
+        )
 
 
 def _extract_usage(response) -> tuple[int, int, int, int]:
@@ -208,9 +221,10 @@ class OpenAIProvider(LLMProvider):
             )
 
         content = response.choices[0].message.content or "{}"
+        _check_truncation(response, call_label, self._core.max_tokens)
         prompt_tokens, completion_tokens, total_tokens, cached_tokens = _extract_usage(response)
         self._core.record_usage(call_label, prompt_tokens, completion_tokens, total_tokens, cached_tokens)
-        _log_call_done(call_label, int((time.perf_counter() - start) * 1000), content, prompt_tokens, completion_tokens, total_tokens)
+        _log_call_done(call_label, int((time.perf_counter() - start) * 1000), content, prompt_tokens, completion_tokens, total_tokens, cached_tokens)
         return json.loads(content)
 
     def _should_fallback(self, exc: Exception) -> bool:
@@ -268,9 +282,10 @@ class AsyncOpenAIProvider(LLMProvider):
             )
 
         content = response.choices[0].message.content or "{}"
+        _check_truncation(response, call_label, self._core.max_tokens)
         prompt_tokens, completion_tokens, total_tokens, cached_tokens = _extract_usage(response)
         self._core.record_usage(call_label, prompt_tokens, completion_tokens, total_tokens, cached_tokens)
-        _log_call_done(call_label, int((time.perf_counter() - start) * 1000), content, prompt_tokens, completion_tokens, total_tokens)
+        _log_call_done(call_label, int((time.perf_counter() - start) * 1000), content, prompt_tokens, completion_tokens, total_tokens, cached_tokens)
         return json.loads(content)
 
     def get_usage_summary(self) -> ApiUsageSummary:

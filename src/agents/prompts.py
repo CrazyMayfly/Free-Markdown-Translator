@@ -42,25 +42,35 @@ def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, ta
     system_prompt = (
         f"You are an expert Markdown translation specialist. Detect the source language automatically and translate markdown text to {target_lang}. "
         "Input JSON fields: task=job type, ctx=shared document hints, prev_summary=source digest of the preceding bundle (for continuity), "
-        "segments=list of units to translate, segment_id=stable output key, context=local section path, text=source text. "
-        f"{_OUTPUT_CONTRACT} "
-        "notes=translation remarks, applied_terms=preserved terms and how they were rendered, confidence=your confidence 0.0-1.0. "
+        "anchor_translations=already-translated segments that open the current section (match their terminology and tone), "
+        "segments=list of units to translate, segment_id=stable output key, context=local section path, text=source text, "
+        "similar=prior translations of similar source text for this segment (follow their choices unless clearly wrong). "
+        'Return JSON with "translations" (one object per input segment) and "context_requests": if some segment cannot be translated '
+        "confidently with the context shown, list {segment_id, need: similar_translations|neighbour_translations, reason} for it "
+        "and translate the rest normally; the missing context will be fetched and the bundle translated once more. "
+        "Notes=translation remarks, applied_terms=preserved terms and how they were rendered, confidence=your confidence 0.0-1.0. "
         "Translate only text, **preserve placeholders**, URLs, code, and markdown control syntax exactly, and follow ctx.style_guide including term preservation. "
         "Use ctx.glossary renderings verbatim and report every domain term you rendered in applied_terms."
     )
-    payload = {
+    payload: dict[str, object] = {
         "task": "translate",
         "ctx": _document_context_payload(context),
         "prev_summary": bundle.summary_before[:400] if bundle.summary_before else "",
-        "segments": [
-            {
-                "segment_id": segment.segment_id,
-                "context": " / ".join(segment.context_path[-2:]) if segment.context_path else "",
-                "text": segment.source_text,
-            }
-            for segment in bundle.segments
-        ],
     }
+    if bundle.anchor_translations:
+        payload["anchor_translations"] = bundle.anchor_translations
+    segments_payload: list[dict[str, object]] = []
+    for segment in bundle.segments:
+        entry: dict[str, object] = {
+            "segment_id": segment.segment_id,
+            "context": " / ".join(segment.context_path[-2:]) if segment.context_path else "",
+            "text": segment.source_text,
+        }
+        similar = bundle.similar_examples.get(segment.segment_id)
+        if similar:
+            entry["similar"] = similar
+        segments_payload.append(entry)
+    payload["segments"] = segments_payload
     return system_prompt, _compact_json(payload)
 
 
@@ -236,10 +246,11 @@ def build_judge_prompts(
         f"You are an impartial translation quality judge. Score the {target_lang} translations of the given Markdown document. "
         "Input JSON fields: task=job type, ctx=document hints, reference=optional reference translations keyed by segment_id, "
         "translations=list of items with segment_id, source and text. "
-        'Return JSON only: {"scores":{"accuracy":n,"fluency":n,"terminology":n,"format":n},"overall":n,"comments":["..."]} '
+        'Return JSON only: {"scores":{"accuracy":n,"fluency":n,"terminology":n,"format":n},"overall":n,"comments":["..."],"weak_segments":["..."]} '
         "with every score on a 1-5 scale (5=excellent) and overall as the weighted general quality. "
         "accuracy=fidelity to source meaning; fluency=natural target-language phrasing; terminology=correct use of domain terms "
-        "and consistent renderings across the document (including ctx.glossary); format=markdown structure, placeholders and code kept intact."
+        "and consistent renderings across the document (including ctx.glossary); format=markdown structure, placeholders and code kept intact. "
+        "weak_segments=segment_ids of the few weakest translations (at most 3, empty list when none stand out)."
     )
     payload: dict[str, object] = {
         "task": "judge",
@@ -271,6 +282,32 @@ def build_guard_prompts(bundle: SegmentBundle, translations: list[TranslationRes
                 "segment_id": segment.segment_id,
                 "source": segment.source_text,
                 "text": translation.translated_text,
+            }
+            for segment, translation in zip(bundle.segments, translations, strict=False)
+        ],
+    }
+    return system_prompt, _compact_json(payload)
+
+
+def build_final_review_prompts(bundle: SegmentBundle, context: DocumentContext, translations: list[TranslationResult]) -> tuple[str, str]:
+    system_prompt = (
+        "You are a document-level translation editor reviewing the COMPLETE document after section-by-section translation. "
+        "Input JSON fields: task=job type, ctx=shared document hints, translations=the document's segments in order with segment_id, source and current text. "
+        'Return JSON only: {"issues":[{"segment_id":"...","type":"accuracy|fluency|terminology|style|format","severity":"low|medium|high","comment":"specific critique"}]}. '
+        "Focus on defects that only appear across segments: broken references between sections, inconsistent terminology or tone drift between distant parts, "
+        "abrupt transitions, pronouns or demonstratives with no resolvable antecedent, repeated translations of the same source rendered differently. "
+        "Do NOT flag local defects a per-section reviewer would catch; do not rewrite style for taste. "
+        "An empty issues list is a valid answer when the document reads coherently."
+    )
+    payload = {
+        "task": "reflect",
+        "ctx": _document_context_payload(context),
+        "prev_summary": "",
+        "translations": [
+            {
+                "segment_id": segment.segment_id,
+                "source": segment.source_text[:240],
+                "text": translation.translated_text[:240],
             }
             for segment, translation in zip(bundle.segments, translations, strict=False)
         ],

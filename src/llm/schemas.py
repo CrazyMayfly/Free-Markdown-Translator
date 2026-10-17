@@ -25,9 +25,22 @@ TRANSLATION_RESPONSE_SCHEMA = {
                 "required": ["segment_id", "translated_text", "notes", "applied_terms", "confidence"],
                 "additionalProperties": False,
             },
-        }
+        },
+        "context_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "segment_id": {"type": "string"},
+                    "need": {"type": "string", "enum": ["similar_translations", "neighbour_translations"]},
+                    "reason": {"type": "string"},
+                },
+                "required": ["segment_id", "need", "reason"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["translations"],
+    "required": ["translations", "context_requests"],
     "additionalProperties": False,
 }
 
@@ -95,7 +108,8 @@ JUDGE_RESPONSE_SCHEMA = {
         },
         "overall": {"type": "number"},
         "comments": {"type": "array", "items": {"type": "string"}},
+        "weak_segments": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["scores", "overall", "comments"],
+    "required": ["scores", "overall", "comments", "weak_segments"],
     "additionalProperties": False,
 }

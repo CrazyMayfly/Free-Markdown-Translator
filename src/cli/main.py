@@ -10,7 +10,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.cli.commands import evaluate_command, translate_command
+from src.cli.commands import evaluate_command, regression_command, translate_command
 from src.cli.errors import present_cli_error
 from src.infra.config import TranslatorConfig, initialize_config, load_config, resolve_config_path
 from src.infra.logging import configure_logging
@@ -134,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tone", help="Translation tone. Defaults to config.yaml style.tone.")
     parser.add_argument("--model", help="Model name. Defaults to config.yaml provider.model.")
     parser.add_argument("--eval", action="store_true", help="Translate without writing output, then run LLM-as-judge quality evaluation and print the judge report.")
+    parser.add_argument("--regression", metavar="GOLDEN_JSON", help="Run a translation quality regression check against a golden set file ({items: [{source, reference}]}).")
     parser.add_argument("--resume", action="store_true", help="Resume an interrupted job: bundles already translated in a previous run are reused from the checkpoint (stored under <output>/.mdtx-state).")
     parser.add_argument("--serve", action="store_true", help="Run as an MCP server on stdio so AI clients (ZCode/Claude Desktop/Cursor) can call mdtx as a tool. Requires the mdtx[mcp] extra.")
     parser.add_argument("--ui-port", type=_parse_positive_int, default=None, help="Serve the local web UI on 127.0.0.1:<port> (mdtx[ui] extra).")
@@ -160,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
             config_path = initialize_config(args.config, force=args.force_init_config)
             print(f"Config ready: {config_path}")
             return 0
+        if args.regression is not None:
+            config = _apply_cli_overrides(args, load_config(args.config))
+            _log_startup_config(args, config)
+            return regression_command(args.regression, config)
         if not args.paths:
             parser.error("the following arguments are required: paths")
         config = _apply_cli_overrides(args, load_config(args.config))

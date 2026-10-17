@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from src.agents.editor_agent import EditorAgent
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.glossary_agent import GlossaryAgent
 from src.agents.reviewer_agent import ReviewerAgent
@@ -14,7 +15,14 @@ from src.agents.translator_agent import TranslatorAgent
 from src.core.errors import OutputWriteError, TranslationPipelineError
 from src.core.glossary import canonical_glossary, detect_glossary_conflicts
 from src.core.orchestrator import Orchestrator
-from src.core.types import ApiUsageSummary, MemoryStore, PipelineResult, SegmentBundle, TranslationResult
+from src.core.types import (
+    ApiUsageSummary,
+    MemoryStore,
+    PipelineResult,
+    SegmentBundle,
+    TranslationOutcome,
+    TranslationResult,
+)
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success
 from src.memory.checkpoint import JobCheckpointStore
@@ -27,6 +35,9 @@ from src.parser.renderer import MarkdownRenderer
 from src.parser.segment_extractor import ProtectedSpanProcessor, SegmentExtractor
 from src.validators.markdown_validator import MarkdownValidator
 from src.validators.output_report import OutputReportBuilder
+from src.validators.semantic_sentinel import SentinelFinding, run_sentinels
+
+_ANCHOR_EXAMPLE_LIMIT = 3
 
 
 class TranslationPipeline:
@@ -42,6 +53,8 @@ class TranslationPipeline:
         memory: MemoryStore | None = None,
         checkpoint_store: JobCheckpointStore | None = None,
         glossary_agent: GlossaryAgent | None = None,
+        glossary_store=None,
+        editor_agent: EditorAgent | None = None,
     ) -> None:
         self.config = config
         self.parser = parser
@@ -53,12 +66,15 @@ class TranslationPipeline:
         self.memory: MemoryStore = memory if memory is not None else NullMemory()
         self.checkpoint_store = checkpoint_store
         self.glossary_agent = glossary_agent
+        self.glossary_store = glossary_store
+        self.editor_agent = editor_agent
         self.context_builder = DocumentContextBuilder()
         self.orchestrator = Orchestrator()
         self.protected_span_processor = ProtectedSpanProcessor()
         self.mapper = AstMapper()
         self.renderer = MarkdownRenderer()
         self.report_builder = OutputReportBuilder()
+        self._sentinel_findings: list[SentinelFinding] = []
 
     def run(
         self,
@@ -95,7 +111,9 @@ class TranslationPipeline:
 
         context = self.context_builder.build(parsed, segments, self.config)
         fingerprint = self._memory_fingerprint(source_text)
+        style_key = self._style_fingerprint()
         mode = self._normalized_mode()
+        self._sentinel_findings = []
         resumed_bundles = self.checkpoint_store.load(input_path, target_lang) if self.checkpoint_store is not None else {}
         context.glossary = await self._build_glossary(context, segments, fingerprint, target_lang, resumed_bundles)
         bundles = self.orchestrator.build_bundles(segments, context, self.config)
@@ -115,8 +133,17 @@ class TranslationPipeline:
             bundle_progress_callback=bundle_progress_callback,
             resumed_bundles=resumed_bundles,
             fingerprint=fingerprint,
+            style_key=style_key,
         )
-        all_translations = await self._consistency_pass(bundles, all_translations, context, target_lang, fingerprint, segment_lookup)
+        all_translations = await self._consistency_pass(bundles, all_translations, context, target_lang, fingerprint, style_key, segment_lookup)
+        if self._should_run_final_edit() and self.editor_agent is not None:
+            logging.info("Running document-level final edit (strict mode)")
+            all_translations = await self.editor_agent.edit_document_async(
+                segments,
+                all_translations,
+                context,
+                max_segments=self.config.pipeline.final_edit_max_segments,
+            )
         all_translations = self._restore_all(all_translations, segment_lookup)
 
         output_text, validation, all_translations = self._render_and_validate(
@@ -126,11 +153,17 @@ class TranslationPipeline:
         )
         if not validation.passed and self._should_run_format_guard(validation):
             logging.warning("Validation failed, running guard (mode=%s errors=%s)", mode, len(validation.errors))
-            repaired = []
             translations_by_bundle = self._translations_by_bundle(bundles, all_translations)
-            for bundle in bundles:
-                bundle_translations = translations_by_bundle[bundle.bundle_id]
-                repaired.extend(await self.format_guard_agent.repair_bundle_async(bundle, bundle_translations))
+            guard_limit = semaphore or asyncio.Semaphore(max(1, self.config.execution.max_parallel_translations))
+
+            async def guard_worker(bundle, bundle_translations):
+                async with guard_limit:
+                    return await self.format_guard_agent.repair_bundle_async(bundle, bundle_translations)
+
+            repaired_lists = await asyncio.gather(
+                *(guard_worker(bundle, translations_by_bundle[bundle.bundle_id]) for bundle in bundles)
+            )
+            repaired = [item for repaired_list in repaired_lists for item in repaired_list]
             output_text, validation, all_translations = self._render_and_validate(
                 parsed=parsed,
                 segments=segments,
@@ -162,6 +195,11 @@ class TranslationPipeline:
             self.checkpoint_store.clear(input_path, target_lang)
 
         provider = self.translator_agent.provider
+        usage = provider.get_usage_summary() if provider is not None else ApiUsageSummary()
+        reviewer_provider = self.reviewer_agent.provider
+        if reviewer_provider is not None and reviewer_provider is not provider:
+            # Review may run on a dedicated model; its tokens belong in the bill.
+            usage.merge(reviewer_provider.get_usage_summary())
         result = PipelineResult(
             input_path=input_path,
             output_path=final_output_path if write_output else None,
@@ -169,13 +207,18 @@ class TranslationPipeline:
             segments=segments,
             translations=all_translations,
             validation=validation,
-            api_usage=provider.get_usage_summary() if provider is not None else ApiUsageSummary(),
+            api_usage=usage,
             context=context,
         )
         memory_stats = self.memory.stats()
         if memory_stats["hits"] or memory_stats["misses"]:
             logging.info("Memory: hits=%s misses=%s", memory_stats["hits"], memory_stats["misses"])
         result.report = self.report_builder.build(result)
+        if self._sentinel_findings:
+            result.report["sentinel_findings"] = [
+                {"segment_id": finding.segment_id, "check": finding.check, "detail": finding.detail}
+                for finding in self._sentinel_findings
+            ]
         return result
 
     def count_bundles(self, input_path: Path, target_lang: str) -> int:
@@ -201,6 +244,19 @@ class TranslationPipeline:
             instructions=self.config.style.instructions,
             preserve_terms=self.config.style.preserve_terms,
             document_id=document_id,
+        )
+
+    def memory_fingerprint_for(self, source_text: str) -> str:
+        """Public wrapper so callers (e.g. --eval feedback) share the key."""
+        return self._memory_fingerprint(source_text)
+
+    def _style_fingerprint(self) -> str:
+        return TranslationMemory.style_fingerprint(
+            model=self.config.provider.model,
+            tone=self.config.style.tone,
+            audience=self.config.style.audience,
+            instructions=self.config.style.instructions,
+            preserve_terms=self.config.style.preserve_terms,
         )
 
     def _build_output_path(self, input_path: Path, target_lang: str) -> Path:
@@ -253,6 +309,13 @@ class TranslationPipeline:
             return True
         return self._normalized_mode() in {"balanced", "strict"} and not validation.passed
 
+    def _should_run_final_edit(self) -> bool:
+        return (
+            self.editor_agent is not None
+            and self.config.pipeline.enable_final_edit
+            and self._normalized_mode() == "strict"
+        )
+
     def _render_and_validate(self, parsed, segments, translations):
         updated = self.mapper.apply(parsed, translations)
         updated.segments = segments  # type: ignore[attr-defined]
@@ -268,17 +331,23 @@ class TranslationPipeline:
         return output_text, validation, translations
 
     async def _build_glossary(self, context, segments, fingerprint: str, target_lang: str, resumed_bundles: dict) -> dict[str, str]:
-        """Authoritative term -> rendering glossary shared by all bundles."""
+        """Authoritative term -> rendering glossary shared by all bundles.
+
+        Precedence: persisted user entries > preserve_terms (config) >
+        persisted model entries > freshly extracted terms. Extracted terms are
+        written back so the glossary accumulates across runs.
+        """
         if self.glossary_agent is None or not self.config.pipeline.enable_glossary:
             return {}
         if self._normalized_mode() == "fast":
             return {}
+        min_confidence = self.config.memory.reuse_min_confidence
         resumed_ids = {item.segment_id for items in resumed_bundles.values() for item in items}
         pending = [
             segment
             for segment in segments
             if segment.segment_id not in resumed_ids
-            and self.memory.peek(segment.source_text, target_lang, fingerprint) is None
+            and self.memory.peek(segment.source_text, target_lang, fingerprint, min_confidence) is None
         ]
         if not pending:
             # Everything comes from memory or a checkpoint: reuse must stay free.
@@ -288,9 +357,16 @@ class TranslationPipeline:
             extracted = await self.glossary_agent.extract_async(context, sample_text, target_lang)
         except Exception as exc:
             logging.warning("Glossary extraction failed (%s); continuing without it", exc)
-            return {}
-        glossary = {term: term for term in self.config.style.preserve_terms}
-        glossary.update(extracted)
+            extracted = {}
+        if self.glossary_store is not None:
+            for term, rendering in extracted.items():
+                self.glossary_store.upsert(target_lang, term, rendering, origin="model")
+        glossary: dict[str, str] = {}
+        if self.glossary_store is not None:
+            glossary.update(self.glossary_store.load(target_lang))
+        glossary.update({term: term for term in self.config.style.preserve_terms})
+        for term, rendering in extracted.items():
+            glossary.setdefault(term, rendering)
         if glossary:
             logging.info("Glossary: %s term(s)", len(glossary))
         return glossary
@@ -302,6 +378,7 @@ class TranslationPipeline:
         context,
         target_lang: str,
         fingerprint: str,
+        style_key: str,
         segment_lookup: dict,
     ) -> list[TranslationResult]:
         """Rewrite segments whose term renderings drifted from the glossary."""
@@ -337,7 +414,11 @@ class TranslationPipeline:
                 updated_by_id[item.segment_id] = item
                 segment = segment_lookup.get(item.segment_id)
                 if segment is not None:
-                    self.memory.store(segment.source_text, target_lang, item.translated_text, fingerprint, item.confidence)
+                    self.memory.store(segment.source_text, target_lang, item.translated_text, fingerprint, item.confidence, style_key)
+        if self.glossary_store is not None:
+            # Canonical renderings become the durable answer for next runs.
+            for term, rendering in canonical.items():
+                self.glossary_store.upsert(target_lang, term, rendering, origin="model")
         if not updated_by_id:
             return translations
         logging.info("Harmonized %s segment(s) across %s conflict term(s)", len(updated_by_id), len(conflicts))
@@ -349,6 +430,10 @@ class TranslationPipeline:
             if segment is not None:
                 item.translated_text = self.protected_span_processor.restore(item.translated_text, segment)
         return translations
+
+    @staticmethod
+    def _is_anchor_bundle(index: int, bundle: SegmentBundle) -> bool:
+        return index == 0 or bool(bundle.segments and bundle.segments[0].node_type == "heading")
 
     async def _translate_bundles(
         self,
@@ -362,12 +447,24 @@ class TranslationPipeline:
         bundle_progress_callback: Callable[[Path, str, str], None] | None,
         resumed_bundles: dict[str, list[TranslationResult]],
         fingerprint: str,
+        style_key: str,
     ) -> list[TranslationResult]:
         if not bundles:
             return []
 
         limit = semaphore or asyncio.Semaphore(max(1, self.config.execution.max_parallel_translations))
         resumed_ids = set(resumed_bundles)
+        results_by_bundle: dict[str, list[TranslationResult]] = {}
+
+        def attach_anchor_context(bundle: SegmentBundle, anchor: SegmentBundle | None, anchor_results: dict) -> None:
+            if anchor is None or anchor.bundle_id not in anchor_results or bundle.anchor_translations:
+                return
+            anchor_segments = anchor.segments
+            anchor_items = anchor_results[anchor.bundle_id]
+            bundle.anchor_translations = [
+                {"source": segment.source_text[:240], "text": item.translated_text[:240]}
+                for segment, item in list(zip(anchor_segments, anchor_items, strict=False))[:_ANCHOR_EXAMPLE_LIMIT]
+            ]
 
         async def worker(bundle: SegmentBundle) -> list[TranslationResult]:
             async with limit:
@@ -376,20 +473,56 @@ class TranslationPipeline:
                     if bundle_progress_callback is not None:
                         bundle_progress_callback(input_path, target_lang, bundle.bundle_id)
                     return translations
-                translations = await self._process_bundle(bundle, context, target_lang, segment_lookup, mode, fingerprint)
+                translations = await self._process_bundle(bundle, context, target_lang, segment_lookup, mode, fingerprint, style_key)
                 if self.checkpoint_store is not None:
                     self.checkpoint_store.save_bundle(input_path, target_lang, bundle.bundle_id, translations)
                 if bundle_progress_callback is not None:
                     bundle_progress_callback(input_path, target_lang, bundle.bundle_id)
                 return translations
 
-        logging.info("Translating %s bundles (concurrency=%s)", len(bundles), getattr(limit, "_value", "?"))
-        async with asyncio.TaskGroup() as task_group:
-            futures = [task_group.create_task(worker(bundle)) for bundle in bundles]
-        all_translations: list[TranslationResult] = []
-        for future in futures:
-            all_translations.extend(future.result())
-        return all_translations
+        anchor_scheduling = self.config.pipeline.enable_anchor_scheduling and mode != "fast"
+        anchor_results: dict[str, list[TranslationResult]] = {}
+        anchor_of: dict[str, SegmentBundle | None] = {}
+        current_anchor: SegmentBundle | None = None
+        for index, bundle in enumerate(bundles):
+            if self._is_anchor_bundle(index, bundle):
+                current_anchor = bundle
+            anchor_of[bundle.bundle_id] = current_anchor
+
+        logging.info(
+            "Translating %s bundles (concurrency=%s, anchors=%s)",
+            len(bundles),
+            getattr(limit, "_value", "?"),
+            sum(1 for index, bundle in enumerate(bundles) if self._is_anchor_bundle(index, bundle)) if anchor_scheduling else "off",
+        )
+        if anchor_scheduling:
+            # Phase 1: each section's anchor bundle runs sequentially in
+            # document order, so its real translations exist as context.
+            for index, bundle in enumerate(bundles):
+                if self._is_anchor_bundle(index, bundle):
+                    anchor_results[bundle.bundle_id] = await worker(bundle)
+            # Phase 2: everything else runs in parallel carrying the anchor.
+            others = [bundle for index, bundle in enumerate(bundles) if not self._is_anchor_bundle(index, bundle)]
+            async with asyncio.TaskGroup() as task_group:
+                futures = [
+                    task_group.create_task(self._anchored_worker(worker, bundle, anchor_of.get(bundle.bundle_id), anchor_results, attach_anchor_context))
+                    for bundle in others
+                ]
+            for bundle, future in zip(others, futures, strict=False):
+                results_by_bundle[bundle.bundle_id] = future.result()
+            for bundle_id, translations in anchor_results.items():
+                results_by_bundle[bundle_id] = translations
+        else:
+            async with asyncio.TaskGroup() as task_group:
+                futures = [task_group.create_task(worker(bundle)) for bundle in bundles]
+            for bundle, future in zip(bundles, futures, strict=False):
+                results_by_bundle[bundle.bundle_id] = future.result()
+        return [item for bundle in bundles for item in results_by_bundle[bundle.bundle_id]]
+
+    @staticmethod
+    async def _anchored_worker(worker, bundle, anchor, anchor_results, attach_anchor_context) -> list[TranslationResult]:
+        attach_anchor_context(bundle, anchor, anchor_results)
+        return await worker(bundle)
 
     async def _process_bundle(
         self,
@@ -399,19 +532,53 @@ class TranslationPipeline:
         segment_lookup,
         mode: str,
         fingerprint: str,
+        style_key: str,
     ) -> list[TranslationResult]:
         logging.info("Translating %s (%s segments)", bundle.bundle_id, len(bundle.segments))
 
+        min_confidence = self.config.memory.reuse_min_confidence
         cached: dict[str, str] = {}
         for segment in bundle.segments:
-            hit = self.memory.find(segment.source_text, target_lang, fingerprint)
+            hit = self.memory.find(segment.source_text, target_lang, fingerprint, min_confidence)
             if hit is not None:
                 cached[segment.segment_id] = hit
 
-        if cached:
-            logging.info("Memory reuse: %s/%s segments in %s", len(cached), len(bundle.segments), bundle.bundle_id)
-
         pending_segments = [segment for segment in bundle.segments if segment.segment_id not in cached]
+
+        # Fuzzy layer: near-identical sources are reused directly; close
+        # matches become few-shot examples inside the prompt.
+        fuzzy_reuse: dict[str, str] = {}
+        similar_examples: dict[str, list[dict[str, str]]] = {}
+        if self.config.memory.fuzzy_examples and pending_segments:
+            for segment in pending_segments:
+                candidates = self.memory.find_similar(
+                    segment.source_text,
+                    target_lang,
+                    style_key,
+                    limit=2,
+                    min_score=self.config.memory.fuzzy_example_threshold,
+                )
+                if not candidates:
+                    continue
+                best_score, _best_source, best_translation = candidates[0]
+                if best_score >= self.config.memory.fuzzy_reuse_threshold:
+                    fuzzy_reuse[segment.segment_id] = best_translation
+                else:
+                    similar_examples[segment.segment_id] = [
+                        {"source": source[:240], "translation": translated[:240]}
+                        for score, source, translated in candidates
+                        if score >= self.config.memory.fuzzy_example_threshold
+                    ]
+            pending_segments = [segment for segment in pending_segments if segment.segment_id not in fuzzy_reuse]
+
+        if cached or fuzzy_reuse:
+            logging.info(
+                "Memory reuse: %s exact + %s fuzzy segments in %s",
+                len(cached),
+                len(fuzzy_reuse),
+                bundle.bundle_id,
+            )
+
         translations: list[TranslationResult] | None = None
         if pending_segments:
             pending_bundle = SegmentBundle(
@@ -420,8 +587,16 @@ class TranslationPipeline:
                 summary_before=bundle.summary_before,
                 summary_after=bundle.summary_after,
                 style_instructions=bundle.style_instructions,
+                similar_examples=similar_examples,
+                anchor_translations=bundle.anchor_translations,
             )
-            translations = await self._translate_with_retry(pending_bundle, context, target_lang)
+            outcome = await self._translate_with_retry(pending_bundle, context, target_lang)
+            if outcome.context_requests and self.config.pipeline.enable_context_pull and mode != "fast":
+                enriched = self._apply_context_requests(pending_bundle, outcome.context_requests, target_lang, style_key)
+                if enriched is not None:
+                    logging.info("Context pull: %s request(s) in %s; re-translating with deeper context", len(outcome.context_requests), bundle.bundle_id)
+                    outcome = await self._translate_with_retry(enriched, context, target_lang)
+            translations = outcome.translations
 
         merged: dict[str, TranslationResult] = {item.segment_id: item for item in (translations or [])}
         for segment in bundle.segments:
@@ -433,6 +608,14 @@ class TranslationPipeline:
                     applied_terms={},
                     confidence=1.0,
                 )
+            elif segment.segment_id in fuzzy_reuse:
+                merged[segment.segment_id] = TranslationResult(
+                    segment_id=segment.segment_id,
+                    translated_text=fuzzy_reuse[segment.segment_id],
+                    notes=["translation-memory-fuzzy"],
+                    applied_terms={},
+                    confidence=0.9,
+                )
         ordered = [merged[segment.segment_id] for segment in bundle.segments]
 
         if not pending_segments:
@@ -440,8 +623,29 @@ class TranslationPipeline:
             # previous run; skip reflection to make reuse free.
             return ordered
 
-        if self._should_run_review(bundle, ordered):
-            logging.info("Reviewing %s (%s)", bundle.bundle_id, mode)
+        sentinel_findings: list[SentinelFinding] = []
+        if self.config.pipeline.enable_sentinels:
+            sentinel_findings = run_sentinels(
+                bundle.segments,
+                ordered,
+                min_ratio=self.config.pipeline.sentinel_min_length_ratio,
+                max_ratio=self.config.pipeline.sentinel_max_length_ratio,
+            )
+            for finding in sentinel_findings:
+                self._sentinel_findings.append(finding)
+                item = merged.get(finding.segment_id)
+                if item is not None:
+                    note = f"sentinel:{finding.check}"
+                    if note not in item.notes:
+                        item.notes.append(note)
+
+        if self._should_run_review(bundle, ordered) or (sentinel_findings and mode != "fast"):
+            logging.info(
+                "Reviewing %s (%s%s)",
+                bundle.bundle_id,
+                mode,
+                f", {len(sentinel_findings)} sentinel finding(s)" if sentinel_findings else "",
+            )
             ordered = await self.reviewer_agent.review_bundle_async(
                 bundle,
                 ordered,
@@ -451,13 +655,57 @@ class TranslationPipeline:
             )
 
         for item in ordered:
-            if item.segment_id in cached and item.notes == ["translation-memory"]:
+            if item.notes in (["translation-memory"], ["translation-memory-fuzzy"]):
                 continue
-            self.memory.store(segment_lookup[item.segment_id].source_text, target_lang, item.translated_text, fingerprint, item.confidence)
+            self.memory.store(
+                segment_lookup[item.segment_id].source_text,
+                target_lang,
+                item.translated_text,
+                fingerprint,
+                item.confidence,
+                style_key,
+            )
 
         return ordered
 
-    async def _translate_with_retry(self, bundle, context, target_lang: str) -> list[TranslationResult]:
+    def _apply_context_requests(self, bundle: SegmentBundle, requests: list[dict], target_lang: str, style_key: str) -> SegmentBundle | None:
+        """Answer the model's pull-style context requests (one extra round).
+
+        similar_translations triggers a deeper translation-memory search
+        (lower threshold, more hits); neighbour_translations is already
+        covered by anchor context when anchors are attached.
+        """
+        segments_by_id = {segment.segment_id: segment for segment in bundle.segments}
+        enriched_similar = dict(bundle.similar_examples)
+        changed = False
+        for request in requests:
+            segment = segments_by_id.get(str(request.get("segment_id", "")))
+            if segment is None:
+                continue
+            need = str(request.get("need", ""))
+            if need != "similar_translations":
+                continue
+            hits = self.memory.find_similar(segment.source_text, target_lang, style_key, limit=5, min_score=0.5)
+            if not hits:
+                continue
+            enriched_similar[segment.segment_id] = [
+                {"source": source[:240], "translation": translated[:240]}
+                for _score, source, translated in hits
+            ]
+            changed = True
+        if not changed:
+            return None
+        return SegmentBundle(
+            bundle_id=bundle.bundle_id,
+            segments=bundle.segments,
+            summary_before=bundle.summary_before,
+            summary_after=bundle.summary_after,
+            style_instructions=bundle.style_instructions,
+            similar_examples=enriched_similar,
+            anchor_translations=bundle.anchor_translations,
+        )
+
+    async def _translate_with_retry(self, bundle, context, target_lang: str) -> TranslationOutcome:
         last_exc: Exception | None = None
         max_attempts = 5  # Retry budget for LLM output format issues.
         for attempt in range(1, max_attempts + 1):

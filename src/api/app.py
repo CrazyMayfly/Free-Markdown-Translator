@@ -64,10 +64,20 @@ def _mask_config(config: TranslatorConfig) -> dict[str, Any]:
             "enable_review": config.pipeline.enable_review,
             "enable_format_guard": config.pipeline.enable_format_guard,
             "fail_on_validation_error": config.pipeline.fail_on_validation_error,
+            "review_max_rounds": config.pipeline.review_max_rounds,
+            "enable_glossary": config.pipeline.enable_glossary,
+            "enable_sentinels": config.pipeline.enable_sentinels,
+            "enable_anchor_scheduling": config.pipeline.enable_anchor_scheduling,
+            "enable_context_pull": config.pipeline.enable_context_pull,
+            "enable_final_edit": config.pipeline.enable_final_edit,
+            "final_edit_max_segments": config.pipeline.final_edit_max_segments,
+            "reviewer_model": config.pipeline.reviewer_model,
+            "judge_model": config.pipeline.judge_model,
         },
         "segmentation": {
             "max_bundle_chars": config.segmentation.max_bundle_chars,
             "max_bundle_segments": config.segmentation.max_bundle_segments,
+            "section_align_min_chars": config.segmentation.section_align_min_chars,
         },
         "input": {"file_pattern": config.input.file_pattern},
         "style": {
@@ -82,7 +92,15 @@ def _mask_config(config: TranslatorConfig) -> dict[str, Any]:
             "write_report": config.output.write_report,
         },
         "execution": {"max_parallel_translations": config.execution.max_parallel_translations},
-        "memory": {"enabled": config.memory.enabled, "path": config.memory.path},
+        "memory": {
+            "enabled": config.memory.enabled,
+            "path": config.memory.path,
+            "scope": config.memory.scope,
+            "fuzzy_examples": config.memory.fuzzy_examples,
+            "reuse_min_confidence": config.memory.reuse_min_confidence,
+            "glossary_persist": config.memory.glossary_persist,
+            "glossary_path": config.memory.glossary_path,
+        },
     }
     return data
 
@@ -133,6 +151,12 @@ class ConfigTestBody(BaseModel):
 
 class RevealBody(BaseModel):
     path: str
+
+
+class GlossaryUpsertBody(BaseModel):
+    lang: str
+    term: str
+    rendering: str
 
 
 def create_app(memory: MemoryStore | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
@@ -396,6 +420,26 @@ def create_app(memory: MemoryStore | None = None, config_loader=None, history: J
             raise HTTPException(status_code=500, detail=f"无法打开访达: {exc}") from exc
         return {"revealed": str(target)}
 
+    @misc_router.get("/glossary")
+    def glossary_list(lang: str = Query(default="")) -> dict[str, Any]:
+        store = _get_glossary_store(app)
+        languages = [lang] if lang else (store.languages() if hasattr(store, "languages") else [])
+        return {"entries": {item: store.entries(item) for item in languages}}
+
+    @misc_router.put("/glossary")
+    def glossary_upsert(body: GlossaryUpsertBody) -> dict[str, Any]:
+        if not body.term.strip() or not body.rendering.strip():
+            raise HTTPException(status_code=400, detail="term and rendering must be non-empty")
+        _get_glossary_store(app).upsert(body.lang, body.term, body.rendering, origin="user")
+        return {"lang": body.lang, "term": body.term.strip(), "rendering": body.rendering.strip()}
+
+    @misc_router.delete("/glossary")
+    def glossary_delete(lang: str = Query(...), term: str = Query(...)) -> dict[str, Any]:
+        deleted = _get_glossary_store(app).delete(lang, term)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Unknown glossary entry: {term}")
+        return {"lang": lang, "term": term, "deleted": True}
+
     @misc_router.get("/memory/stats")
     def memory_stats() -> dict[str, Any]:
         memory = _get_memory(app)
@@ -440,6 +484,14 @@ def _get_memory(app: FastAPI):
     if app.state.memory is None:
         app.state.memory = build_memory(load_config())
     return app.state.memory
+
+
+def _get_glossary_store(app: FastAPI):
+    if getattr(app.state, "glossary_store", None) is None:
+        from src.memory.glossary_store import build_glossary_store
+
+        app.state.glossary_store = build_glossary_store(load_config())
+    return app.state.glossary_store
 
 
 def run_server(port: int, open_browser: bool = True) -> None:

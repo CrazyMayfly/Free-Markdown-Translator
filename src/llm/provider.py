@@ -8,6 +8,12 @@ from src.core.types import ApiUsageSummary
 
 
 class LLMProvider(ABC):
+    @property
+    @abstractmethod
+    def model(self) -> str:
+        """Model identifier used for this provider instance."""
+        raise NotImplementedError
+
     @abstractmethod
     def chat_json(
         self,
