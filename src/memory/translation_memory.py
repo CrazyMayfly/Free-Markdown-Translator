@@ -7,6 +7,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from src.core.types import MemoryStore
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS translation_entries (
     entry_key TEXT PRIMARY KEY,
@@ -140,7 +142,7 @@ class NullMemory:
         return 0
 
 
-def build_memory(config) -> object:
+def build_memory(config) -> MemoryStore:
     from src.infra.config import TranslatorConfig
 
     if not isinstance(config, TranslatorConfig) or not config.memory.enabled:

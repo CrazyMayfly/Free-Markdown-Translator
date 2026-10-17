@@ -52,7 +52,11 @@ def rerender_markdown(markdown: str, segments: list[dict[str, Any]], edits: dict
             if idx < 0:
                 continue  # already replaced by an earlier edit; keep going
         parts.append(markdown[cursor:idx])
-        parts.append(edits.get(segment.get("segment_id"), current))
+        segment_id = segment.get("segment_id")
+        if isinstance(segment_id, str) and segment_id in edits:
+            parts.append(edits[segment_id])
+        else:
+            parts.append(current)
         cursor = idx + len(current)
     parts.append(markdown[cursor:])
     return "".join(parts)

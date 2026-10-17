@@ -56,7 +56,7 @@ def _history_with(path: Path, result: dict | None = None) -> JobHistory:
     return history
 
 
-def _app_with_history(history: JobHistory, output_dir: str):
+def _app_with_history(history: JobHistory | None, output_dir: str):
     config = TranslatorConfig()
     config.output.directory = output_dir
     config.provider.api_key = None
@@ -163,7 +163,7 @@ class HistoryPersistenceTests(unittest.TestCase):
                         self.assertEqual(edited.status_code, 200, edited.text)
 
                         record = JobHistory(history_path).get(job_id)
-                        self.assertIsNotNone(record)
+                        assert record is not None
                         self.assertIsNotNone(record.get("params"))
                         self.assertEqual(record["params"]["target_langs"], ["zh-CN"])
 

@@ -20,9 +20,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.api.history import JobHistory
 from src.cli.commands import TranslationSource, _build_provider, _build_task_output_path, _resolve_relative_output_path, build_pipeline
 from src.core.errors import OutputWriteError
-from src.core.types import ApiUsageSummary
+from src.core.types import ApiUsageSummary, MemoryStore
 from src.infra.config import TranslatorConfig, load_config
 from src.memory.checkpoint import JobCheckpointStore
 
@@ -77,9 +78,9 @@ class Job:
 class JobManager:
     def __init__(
         self,
-        memory: object | None = None,
+        memory: MemoryStore | None = None,
         config_loader: Callable[[], TranslatorConfig] | None = None,
-        history: object | None = None,
+        history: JobHistory | None = None,
     ) -> None:
         self._jobs: dict[str, Job] = {}
         self._memory = memory
@@ -247,6 +248,7 @@ class JobManager:
         output_path = _build_task_output_path(source, target_lang, output_dir, config)
         job.emit("pair_start", input=str(input_path), lang=target_lang, index=index, bundles=total_bundles)
         write_error: str | None = None
+        result: Any
         try:
             result = await pipeline.run_async(
                 input_path,

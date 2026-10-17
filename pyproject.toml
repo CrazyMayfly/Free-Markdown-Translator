@@ -33,7 +33,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
 ]
 mcp = [
     "mcp>=1.2.0",
@@ -51,6 +54,25 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/test"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/test/*", "src/buildtool/*"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+# The codebase is untyped-by-annotation in places; this bar catches real
+# attribute/argument mistakes (the OutputWriteError class of bug) without
+# demanding full annotation coverage.
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["tqdm.*", "tqdm", "PyInstaller.*", "PIL.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 140

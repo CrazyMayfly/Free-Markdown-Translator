@@ -16,7 +16,7 @@ from src.agents.judge_agent import JudgeAgent
 from src.agents.reviewer_agent import ReviewerAgent
 from src.cli.commands import evaluate_command
 from src.core.pipeline import TranslationPipeline
-from src.core.types import DocumentContext
+from src.core.types import DocumentContext, TranslationResult
 from src.infra.config import TranslatorConfig
 from src.llm.schemas import JUDGE_RESPONSE_SCHEMA, REFLECTION_RESPONSE_SCHEMA, TRANSLATION_RESPONSE_SCHEMA
 from src.parser.markdown_parser import MarkdownParser
@@ -32,6 +32,7 @@ class IssueFakeProvider(FakeProvider):
         super().__init__()
         self.severity = severity
         self.segment_index = segment_index
+        self.reflect_payloads: list[dict] = []
 
     def chat_json(self, system_prompt, user_prompt, call_label="llm", response_schema=None):
         payload = json.loads(user_prompt)
@@ -128,18 +129,15 @@ class ReflectionLoopTests(unittest.TestCase):
         self.assertIn("[IMPROVED]", result.translated_text)
 
     def test_round_two_reflect_only_covers_improved_segments(self) -> None:
-        provider = IssueFakeProvider(severity="high")
-        provider.reflect_payloads = []
-        original_reflect = provider.chat_json
+        class RecordingProvider(IssueFakeProvider):
+            def chat_json(self, system_prompt, user_prompt, call_label="llm", response_schema=None):
+                import json as _json
 
-        def record_and_reflect(system_prompt, user_prompt, call_label="llm", response_schema=None):
-            import json as _json
+                if _json.loads(user_prompt)["task"] == "reflect":
+                    self.reflect_payloads.append(_json.loads(user_prompt))
+                return super().chat_json(system_prompt, user_prompt, call_label, response_schema)
 
-            if _json.loads(user_prompt)["task"] == "reflect":
-                provider.reflect_payloads.append(_json.loads(user_prompt))
-            return original_reflect(system_prompt, user_prompt, call_label, response_schema)
-
-        provider.chat_json = record_and_reflect
+        provider = RecordingProvider(severity="high")
         pipeline = _build_pipeline(provider, _default_config("strict"))
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "README.md"
@@ -173,7 +171,7 @@ class JudgeTests(unittest.TestCase):
     def test_judge_agent_parses_scores(self) -> None:
         provider = FakeProvider()
         segments = SegmentExtractor().extract(MarkdownParser().parse(SAMPLE_MARKDOWN, Path("a.md"), "zh-CN"))
-        translations = []
+        translations: list[TranslationResult] = []
         report = JudgeAgent(provider).evaluate(segments, translations, None, "zh-CN")
         self.assertEqual(report["overall"], 4.5)
         self.assertEqual(report["scores"]["accuracy"], 5.0)

@@ -54,6 +54,7 @@ class JudgeAgent:
         return self._parse(payload, target_lang)
 
     def _call(self, segments, translations, context, target_lang, reference) -> dict:
+        assert self.provider is not None  # evaluate() already rejected None
         if context is None:
             context = DocumentContext(title="", abstract="", section_summaries={}, style_guide=[], audience="")
         system_prompt, user_prompt = build_judge_prompts(context, target_lang, segments, translations, reference)

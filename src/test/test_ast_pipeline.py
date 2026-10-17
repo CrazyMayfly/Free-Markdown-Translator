@@ -22,6 +22,7 @@ from src.core.errors import TranslationPipelineError
 from src.core.pipeline import TranslationPipeline
 from src.core.types import ApiUsageSummary, DocumentContext, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
+from src.llm.provider import LLMProvider
 from src.parser.ast_mapper import AstMapper
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import ProtectedSpanProcessor, SegmentExtractor
@@ -37,7 +38,7 @@ Paragraph with `code` and [link](https://example.com).
 """
 
 
-class FakeProvider:
+class FakeProvider(LLMProvider):
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.schemas: list[dict | None] = []

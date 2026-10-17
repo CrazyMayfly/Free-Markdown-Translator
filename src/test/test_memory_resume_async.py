@@ -106,6 +106,7 @@ class CheckpointTests(unittest.TestCase):
             # Simulate an interrupted run: bundle-0 was completed and saved.
             first_provider = FakeProvider()
             first_pipeline = _pipeline(first_provider, _config(), checkpoint_store=store)
+            assert first_pipeline.checkpoint_store is not None
             first_pipeline.checkpoint_store.save_bundle(
                 input_path,
                 "zh-CN",

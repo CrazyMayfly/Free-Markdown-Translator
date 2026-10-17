@@ -119,10 +119,11 @@ def _neighbor_payload(bundle: SegmentBundle, index: int, translations_by_id: dic
     neighbors: dict[str, dict[str, str] | None] = {"prev": None, "next": None}
 
     def describe(segment) -> dict[str, str]:
+        previous = translations_by_id.get(segment.segment_id)
         entry = {
             "segment_id": segment.segment_id,
             "source": segment.source_text[:300],
-            "text": (translations_by_id.get(segment.segment_id).translated_text[:300] if translations_by_id.get(segment.segment_id) else ""),
+            "text": previous.translated_text[:300] if previous else "",
         }
         return entry
 

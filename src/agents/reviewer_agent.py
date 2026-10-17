@@ -31,7 +31,8 @@ class ReviewerAgent:
         min_severity: str = "high",
         max_rounds: int = 1,
     ) -> list[TranslationResult]:
-        if self.provider is None:
+        provider = self.provider
+        if provider is None:
             return translations
         current = list(translations)
         scope_ids: set[str] | None = None
@@ -40,7 +41,7 @@ class ReviewerAgent:
             if not round_bundle.segments:
                 break
             system_prompt, user_prompt = build_reflection_prompts(round_bundle, context, round_translations)
-            payload = self.provider.chat_json(
+            payload = provider.chat_json(
                 system_prompt,
                 user_prompt,
                 call_label="reflect",
@@ -111,6 +112,7 @@ class ReviewerAgent:
         translations: list[TranslationResult],
         issues: list[dict],
     ) -> list[TranslationResult]:
+        assert self.provider is not None  # callers run only with a provider
         system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
         payload = self.provider.chat_json(
             system_prompt,
@@ -127,6 +129,7 @@ class ReviewerAgent:
         translations: list[TranslationResult],
         issues: list[dict],
     ) -> list[TranslationResult]:
+        assert self.provider is not None  # callers run only with a provider
         system_prompt, user_prompt = build_improve_prompts(bundle, context, translations, issues)
         payload = await self.provider.chat_json_async(
             system_prompt,

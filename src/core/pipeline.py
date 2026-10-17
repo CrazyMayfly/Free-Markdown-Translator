@@ -14,7 +14,7 @@ from src.agents.translator_agent import TranslatorAgent
 from src.core.errors import OutputWriteError, TranslationPipelineError
 from src.core.glossary import canonical_glossary, detect_glossary_conflicts
 from src.core.orchestrator import Orchestrator
-from src.core.types import PipelineResult, SegmentBundle, TranslationResult
+from src.core.types import ApiUsageSummary, MemoryStore, PipelineResult, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success
 from src.memory.checkpoint import JobCheckpointStore
@@ -39,7 +39,7 @@ class TranslationPipeline:
         reviewer_agent: ReviewerAgent,
         format_guard_agent: FormatGuardAgent,
         validator: MarkdownValidator,
-        memory: object | None = None,
+        memory: MemoryStore | None = None,
         checkpoint_store: JobCheckpointStore | None = None,
         glossary_agent: GlossaryAgent | None = None,
     ) -> None:
@@ -50,7 +50,7 @@ class TranslationPipeline:
         self.reviewer_agent = reviewer_agent
         self.format_guard_agent = format_guard_agent
         self.validator = validator
-        self.memory = memory if memory is not None else NullMemory()
+        self.memory: MemoryStore = memory if memory is not None else NullMemory()
         self.checkpoint_store = checkpoint_store
         self.glossary_agent = glossary_agent
         self.context_builder = DocumentContextBuilder()
@@ -161,6 +161,7 @@ class TranslationPipeline:
         if self.checkpoint_store is not None and validation.passed:
             self.checkpoint_store.clear(input_path, target_lang)
 
+        provider = self.translator_agent.provider
         result = PipelineResult(
             input_path=input_path,
             output_path=final_output_path if write_output else None,
@@ -168,7 +169,7 @@ class TranslationPipeline:
             segments=segments,
             translations=all_translations,
             validation=validation,
-            api_usage=self.translator_agent.provider.get_usage_summary(),
+            api_usage=provider.get_usage_summary() if provider is not None else ApiUsageSummary(),
             context=context,
         )
         memory_stats = self.memory.stats()

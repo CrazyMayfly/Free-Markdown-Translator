@@ -74,7 +74,14 @@ function onEvent(event: JobEvent) {
   if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
   if (event.usage) {
     // Backend sends cumulative snapshots; just adopt them (no double count).
-    usage.value = { ...event.usage };
+    const incoming = event.usage;
+    usage.value = {
+      prompt: incoming.prompt ?? 0,
+      completion: incoming.completion ?? 0,
+      total: incoming.total ?? 0,
+      cached: incoming.cached ?? 0,
+      calls: incoming.calls ?? 0,
+    };
   }
   if (event.type === "progress") {
     currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;

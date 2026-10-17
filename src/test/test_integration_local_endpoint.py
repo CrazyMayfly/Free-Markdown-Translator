@@ -99,6 +99,10 @@ class _MockOpenAIHandler(BaseHTTPRequestHandler):
 class RealClientIntegrationTests(unittest.TestCase):
     """Drives the real AsyncOpenAIProvider + CLI against a local mock endpoint."""
 
+    httpd: ThreadingHTTPServer
+    port: int
+    thread: threading.Thread
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), _MockOpenAIHandler)

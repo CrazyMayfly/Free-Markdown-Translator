@@ -59,9 +59,13 @@ def log_success(message: str, *args, **kwargs) -> None:
     logging.getLogger().info(message, *args, extra=extra, stacklevel=2, **kwargs)
 
 
+_configured = False
+
+
 def configure_logging(level: int = logging.INFO) -> None:
+    global _configured
     root_logger = logging.getLogger()
-    if getattr(configure_logging, "_configured", False):
+    if _configured:
         root_logger.setLevel(level)
         return
 
@@ -86,4 +90,4 @@ def configure_logging(level: int = logging.INFO) -> None:
     root_logger.setLevel(level)
     for logger_name in ("openai", "openai._base_client", "httpx", "httpcore"):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
-    configure_logging._configured = True
+    _configured = True

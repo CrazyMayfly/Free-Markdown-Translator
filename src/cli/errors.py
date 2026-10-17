@@ -23,12 +23,12 @@ def _extract_model_service_error_message(exc: Exception) -> str | None:
     if isinstance(body, dict):
         error = body.get("error")
         if isinstance(error, dict):
-            message = error.get("message")
-            if isinstance(message, str) and message.strip():
-                return message.strip()
-        message = body.get("message")
-        if isinstance(message, str) and message.strip():
-            return message.strip()
+            candidate = error.get("message")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        candidate = body.get("message")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
 
     response = getattr(exc, "response", None)
     if response is not None:
@@ -42,12 +42,12 @@ def _extract_model_service_error_message(exc: Exception) -> str | None:
         if isinstance(data, dict):
             error = data.get("error")
             if isinstance(error, dict):
-                message = error.get("message")
-                if isinstance(message, str) and message.strip():
-                    return message.strip()
-            message = data.get("message")
-            if isinstance(message, str) and message.strip():
-                return message.strip()
+                candidate = error.get("message")
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            candidate = data.get("message")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
 
     message = str(exc).strip()
     return message or None
@@ -125,12 +125,22 @@ def present_cli_error(exc: Exception, *, verbose: bool) -> CliErrorPresentation:
                 )
             )
 
+    # The guard below short-circuits before the class names are evaluated,
+    # so this module stays importable without the openai extra installed.
     try:
         from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
-    except ModuleNotFoundError:
-        APIConnectionError = APITimeoutError = AuthenticationError = RateLimitError = APIStatusError = None
 
-    if APIConnectionError is not None and isinstance(exc, APIConnectionError):
+        api_error_types: tuple[type[Exception], ...] = (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            AuthenticationError,
+            RateLimitError,
+        )
+    except ModuleNotFoundError:
+        api_error_types = ()
+
+    if api_error_types and isinstance(exc, APIConnectionError):
         return CliErrorPresentation(
             "\n".join(
                 [
@@ -140,7 +150,7 @@ def present_cli_error(exc: Exception, *, verbose: bool) -> CliErrorPresentation:
             )
         )
 
-    if APITimeoutError is not None and isinstance(exc, APITimeoutError):
+    if api_error_types and isinstance(exc, APITimeoutError):
         return CliErrorPresentation(
             "\n".join(
                 [
@@ -150,7 +160,7 @@ def present_cli_error(exc: Exception, *, verbose: bool) -> CliErrorPresentation:
             )
         )
 
-    if AuthenticationError is not None and isinstance(exc, AuthenticationError):
+    if api_error_types and isinstance(exc, AuthenticationError):
         return CliErrorPresentation(
             "\n".join(
                 [
@@ -160,7 +170,7 @@ def present_cli_error(exc: Exception, *, verbose: bool) -> CliErrorPresentation:
             )
         )
 
-    if RateLimitError is not None and isinstance(exc, RateLimitError):
+    if api_error_types and isinstance(exc, RateLimitError):
         return CliErrorPresentation(
             "\n".join(
                 [
@@ -170,7 +180,7 @@ def present_cli_error(exc: Exception, *, verbose: bool) -> CliErrorPresentation:
             )
         )
 
-    if APIStatusError is not None and isinstance(exc, APIStatusError):
+    if api_error_types and isinstance(exc, APIStatusError):
         status_code = getattr(exc, "status_code", "unknown")
         provider_message = _extract_model_service_error_message(exc)
         if provider_message:

@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from src.api.history import JobHistory, rerender_markdown
 from src.api.jobs import TERMINAL_STATUSES, JobManager, JobParams
+from src.core.types import MemoryStore
 from src.infra.config import (
     TranslatorConfig,
     default_user_config_path,
@@ -134,7 +135,7 @@ class RevealBody(BaseModel):
     path: str
 
 
-def create_app(memory: object | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
+def create_app(memory: MemoryStore | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
     app = FastAPI(title="mdtx", version="3.0.0")
     app.add_middleware(
         CORSMiddleware,

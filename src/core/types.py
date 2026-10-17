@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class MemoryStore(Protocol):
+    """Translation memory interface shared by TranslationMemory and NullMemory."""
+
+    def find(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None: ...
+
+    def peek(self, source_text: str, target_lang: str, fingerprint: str = "") -> str | None: ...
+
+    def store(self, source_text: str, target_lang: str, translated_text: str, fingerprint: str = "", confidence: float = 0.0) -> None: ...
+
+    def stats(self) -> dict[str, int]: ...
 
 
 @dataclass

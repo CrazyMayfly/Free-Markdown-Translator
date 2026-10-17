@@ -17,7 +17,7 @@ from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
 from src.core.orchestrator import Orchestrator
 from src.core.pipeline import TranslationPipeline
-from src.core.types import ApiUsageSummary
+from src.core.types import ApiUsageSummary, MemoryStore
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success, log_task_context
 from src.llm.client import AsyncOpenAIProvider
@@ -52,7 +52,7 @@ def _build_provider(config: TranslatorConfig):
     )
 
 
-def build_pipeline(config: TranslatorConfig, memory: object | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
+def build_pipeline(config: TranslatorConfig, memory: MemoryStore | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
     provider = _build_provider(config)
     return TranslationPipeline(
         config=config,
@@ -210,7 +210,7 @@ def _task_checkpoint_store(task: TranslationTask, config: TranslatorConfig, chec
 async def _run_translation_task_async(
     task: TranslationTask,
     config: TranslatorConfig,
-    memory: object,
+    memory: MemoryStore,
     checkpoint_dir: Path | None,
     semaphore: asyncio.Semaphore,
     progress_tracker: BundleProgressTracker | None,
@@ -312,7 +312,7 @@ def _log_total_token_usage(usage: ApiUsageSummary, task_count: int) -> None:
 async def _translate_all_tasks(
     tasks: list[TranslationTask],
     config: TranslatorConfig,
-    memory: object,
+    memory: MemoryStore,
     checkpoint_dir: Path | None,
     total_bundles: int,
 ) -> ApiUsageSummary:

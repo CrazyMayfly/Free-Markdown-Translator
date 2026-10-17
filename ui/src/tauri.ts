@@ -10,7 +10,7 @@ export async function resolveApiBase(): Promise<ConnectionResult> {
   if (window.__MDTX_API_BASE__) {
     return { base: window.__MDTX_API_BASE__, error: null };
   }
-  const tauri = (window as Record<string, unknown>).__TAURI_INTERNALS__;
+  const tauri = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   if (!tauri) {
     return { base: "", error: null };
   }
@@ -52,7 +52,7 @@ export async function resolveApiBase(): Promise<ConnectionResult> {
 
 /** Absolute paths of files/folders dropped onto the window (Tauri only). */
 export async function onNativeFileDrop(callback: (paths: string[]) => void): Promise<() => void> {
-  const tauri = (window as Record<string, unknown>).__TAURI_INTERNALS__;
+  const tauri = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   if (!tauri) {
     return () => undefined;
   }
@@ -68,5 +68,5 @@ export async function onNativeFileDrop(callback: (paths: string[]) => void): Pro
 }
 
 export function isTauri(): boolean {
-  return Boolean((window as Record<string, unknown>).__TAURI_INTERNALS__);
+  return Boolean((window as unknown as Record<string, unknown>).__TAURI_INTERNALS__);
 }

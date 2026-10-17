@@ -16,6 +16,7 @@ export interface JobEvent {
   bundles?: number;
   usage?: Record<string, number>;
   results?: unknown[];
+  write_error?: string;
 }
 
 export type JobEventHandler = (event: JobEvent) => void;
