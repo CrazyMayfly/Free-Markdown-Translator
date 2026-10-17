@@ -19,6 +19,10 @@ class ProtectedSpanProcessor:
         text = re.sub(r"(?m)^(#{1,6}\s+)", lambda match: store(match.group(1), "md"), text)
         text = re.sub(r"(?m)^((?:>\s?)+)", lambda match: store(match.group(1), "md"), text)
         text = re.sub(r"(?m)^(\s*(?:[-+*]|\d+\.)\s+)", lambda match: store(match.group(1), "md"), text)
+        # A table row's leading pipe is structural like list/quote markers:
+        # without protection, any preamble a model prepends to the row breaks
+        # GFM table recognition on the way back in.
+        text = re.sub(r"(?m)^(\s*\|)", lambda match: store(match.group(1), "md"), text)
         text = re.sub(r"`[^`\n]+`", lambda match: store(match.group(0), "code"), text)
         text = re.sub(r"</?[^>\n]+?>", lambda match: store(match.group(0), "html"), text)
         text = re.sub(

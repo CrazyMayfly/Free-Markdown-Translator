@@ -7,7 +7,7 @@ from src.parser.frontmatter import split_front_matter
 
 
 class StructureValidator:
-    IMMUTABLE_TOKEN_TYPES = {"fence", "code_block", "bullet_list_open", "ordered_list_open", "heading_open"}
+    IMMUTABLE_TOKEN_TYPES = {"fence", "code_block", "bullet_list_open", "ordered_list_open", "heading_open", "table_open"}
 
     def __init__(self) -> None:
         self.md = MarkdownIt("commonmark", {"html": True}).enable("table")
