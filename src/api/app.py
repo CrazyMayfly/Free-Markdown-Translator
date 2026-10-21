@@ -168,7 +168,7 @@ class GlossaryStatusBody(BaseModel):
     status: str
 
 
-API_VERSION = "3.1.0"
+API_VERSION = "3.2.0"
 
 # Capabilities advertised by this sidecar build. The UI checks these to
 # decide which status features to enable; a stale packaged sidecar that
