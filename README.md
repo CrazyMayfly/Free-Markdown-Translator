@@ -289,10 +289,13 @@ pipeline:
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
-# 分段策略。控制一次发送给模型的文本包大小。
+# 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
+# 预算单位是估算 token 而非字符：同样 6000 字符，中文约 4200 token、英文约 1800 token。
 segmentation:
-  max_bundle_chars: 6000
-  max_bundle_segments: 36
+  # 单个文本包的硬上限（估算源 token），也是超长块按行拆分的阈值。
+  max_bundle_tokens: 3000
+  # 小章节/尾包合并到该 token 数为止；0 表示不合并。
+  min_bundle_tokens: 800
 
 # 输入规则。
 input:

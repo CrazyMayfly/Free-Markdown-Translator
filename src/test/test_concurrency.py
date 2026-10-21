@@ -22,13 +22,12 @@ from src.parser.segment_extractor import SegmentExtractor
 from src.test.test_ast_pipeline import FakeProvider
 from src.validators.markdown_validator import MarkdownValidator
 
-# Each section is well past section_align_min_chars (400), so every heading
-# after the first starts a new bundle: N sections -> exactly N bundles, and
-# each bundle stays under review_min_segments (6) so only "translate" fires.
+# Sections are structural bundle boundaries; the test config caps each section
+# at 600 chars so N sections produce N bundles (the small H1 merges forward).
+# Bundles stay under review_min_segments (6) so only "translate" fires.
 _FILLER = (
-    "This paragraph deliberately runs long enough to push the current bundle "
-    "past the section alignment threshold, so the next heading is forced to "
-    "start a fresh bundle of its own. "
+    "This paragraph deliberately runs long enough to exercise bundle packing "
+    "without crossing the per-bundle character cap used by these tests. "
 )
 
 
@@ -82,6 +81,11 @@ class _SemaphoreTests(unittest.TestCase):
         # every section-starting bundle by design.
         config.pipeline.enable_anchor_scheduling = False
         config.execution.max_parallel_translations = parallel
+        # Each fixture section is ~547 chars (~165 tokens); this keeps one
+        # section per bundle (the small H1 section merges forward) so the test
+        # can count calls.
+        config.segmentation.max_bundle_tokens = 180
+        config.segmentation.min_bundle_tokens = 12
         return config
 
     def test_semaphore_one_serializes_all_llm_calls(self) -> None:

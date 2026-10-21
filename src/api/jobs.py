@@ -149,9 +149,8 @@ class JobManager:
                     tone=config.style.tone,
                     audience=config.style.audience,
                     mode=config.pipeline.mode,
-                    max_bundle_chars=config.segmentation.max_bundle_chars,
-                    max_bundle_segments=config.segmentation.max_bundle_segments,
-                    section_align_min_chars=config.segmentation.section_align_min_chars,
+                    max_bundle_tokens=config.segmentation.max_bundle_tokens,
+                    min_bundle_tokens=config.segmentation.min_bundle_tokens,
                 ),
             )
         try:
@@ -306,15 +305,17 @@ def _serialize_result(result, target_lang: str, judge_report: dict | None) -> di
     segments = []
     for segment in result.segments:
         translation = translations_by_id.get(segment.segment_id)
-        segments.append(
-            {
-                "segment_id": segment.segment_id,
-                "context_path": segment.context_path,
-                "source": segment.source_text,
-                "translated": translation.translated_text if translation else "",
-                "confidence": translation.confidence if translation else 0.0,
-            }
-        )
+        entry = {
+            "segment_id": segment.segment_id,
+            "context_path": segment.context_path,
+            "source": segment.source_text,
+            "translated": translation.translated_text if translation else "",
+            "confidence": translation.confidence if translation else 0.0,
+        }
+        if segment.metadata.get("output_start") is not None:
+            entry["output_start"] = segment.metadata["output_start"]
+            entry["output_end"] = segment.metadata["output_end"]
+        segments.append(entry)
     return {
         "input_path": str(result.input_path),
         "output_path": str(result.output_path) if result.output_path else None,

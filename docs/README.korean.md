@@ -159,10 +159,10 @@ pipeline:
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
-# 分段策略。控制一次发送给模型的文本包大小。
+# 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_chars: 6000
-  max_bundle_segments: 36
+  max_bundle_tokens: 3000
+  min_bundle_tokens: 800
 
 # 输入规则。
 input:

@@ -15,6 +15,7 @@ from src.agents.translator_agent import TranslatorAgent
 from src.core.glossary import canonical_glossary, detect_glossary_conflicts
 from src.core.orchestrator import Orchestrator
 from src.core.pipeline import TranslationPipeline
+from src.core.tokens import estimate_tokens
 from src.core.types import DocumentContext, Segment, SegmentBundle, TranslationResult
 from src.infra.config import TranslatorConfig
 from src.memory.document_context import DocumentContextBuilder
@@ -26,7 +27,14 @@ from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuar
 from src.validators.markdown_validator import MarkdownValidator
 
 
-def _segment(segment_id: str, node_type: str, text: str, line_start: int, line_end: int) -> Segment:
+def _segment(
+    segment_id: str,
+    node_type: str,
+    text: str,
+    line_start: int,
+    line_end: int,
+    metadata: dict | None = None,
+) -> Segment:
     return Segment(
         segment_id=segment_id,
         node_type=node_type,
@@ -34,7 +42,12 @@ def _segment(segment_id: str, node_type: str, text: str, line_start: int, line_e
         context_path=[],
         line_start=line_start,
         line_end=line_end,
+        metadata=metadata or {},
     )
+
+
+def estimate_tokens_of(segments) -> int:
+    return sum(estimate_tokens(segment.source_text) for segment in segments)
 
 
 def _config(**overrides) -> TranslatorConfig:
@@ -43,9 +56,8 @@ def _config(**overrides) -> TranslatorConfig:
     config.pipeline.enable_review = False
     config.pipeline.enable_format_guard = False
     config.pipeline.enable_glossary = overrides.get("enable_glossary", True)
-    config.segmentation.max_bundle_chars = overrides.get("max_bundle_chars", 6000)
-    config.segmentation.max_bundle_segments = overrides.get("max_bundle_segments", 12)
-    config.segmentation.section_align_min_chars = overrides.get("section_align_min_chars", 400)
+    config.segmentation.max_bundle_tokens = overrides.get("max_bundle_tokens", 3000)
+    config.segmentation.min_bundle_tokens = overrides.get("min_bundle_tokens", 0)
     return config
 
 
@@ -54,7 +66,7 @@ class SemanticBundlingTests(unittest.TestCase):
         context = DocumentContext(title="", abstract="", section_summaries={}, style_guide=[], audience="")
         return Orchestrator().build_bundles(segments, context, config)
 
-    def test_bundle_boundary_aligns_with_heading_for_large_sections(self) -> None:
+    def test_section_boundary_starts_a_bundle_when_min_is_zero(self) -> None:
         segments = [
             _segment("s0", "paragraph", "A" * 450, 0, 0),
             _segment("s1", "heading", "Section B", 2, 2),
@@ -64,51 +76,106 @@ class SemanticBundlingTests(unittest.TestCase):
         self.assertEqual([bundle.bundle_id for bundle in bundles], ["bundle-0", "bundle-1"])
         self.assertEqual([segment.segment_id for segment in bundles[1].segments], ["s1", "s2"])
 
-    def test_small_sections_stay_in_one_bundle(self) -> None:
+    def test_small_sections_merge_until_min_bundle_tokens(self) -> None:
         segments = [
             _segment("s0", "paragraph", "A" * 100, 0, 0),
             _segment("s1", "heading", "Section B", 2, 2),
             _segment("s2", "paragraph", "content", 4, 4),
         ]
-        bundles = self._bundles(segments, _config())
+        bundles = self._bundles(segments, _config(min_bundle_tokens=200))
         self.assertEqual(len(bundles), 1)
 
-    def test_consecutive_headings_do_not_fragment_bundles(self) -> None:
+    def test_small_sections_stay_separate_without_minimum(self) -> None:
+        segments = [
+            _segment("s0", "paragraph", "A" * 100, 0, 0),
+            _segment("s1", "heading", "Section B", 2, 2),
+            _segment("s2", "paragraph", "content", 4, 4),
+        ]
+        bundles = self._bundles(segments, _config(min_bundle_tokens=0))
+        self.assertEqual(len(bundles), 2)
+
+    def test_consecutive_headings_merge_with_small_sections(self) -> None:
         segments = [
             _segment("s0", "paragraph", "A" * 450, 0, 0),
             _segment("s1", "heading", "H1", 2, 2),
             _segment("s2", "heading", "H2", 3, 3),
             _segment("s3", "paragraph", "content", 5, 5),
         ]
-        bundles = self._bundles(segments, _config())
-        self.assertEqual(len(bundles), 2)
-        self.assertEqual([segment.segment_id for segment in bundles[1].segments], ["s1", "s2", "s3"])
+        bundles = self._bundles(segments, _config(min_bundle_tokens=200))
+        self.assertEqual(len(bundles), 1)
 
-    def test_adjacent_table_cells_are_not_split_by_size_limits(self) -> None:
-        cells = [
-            _segment(f"c{i}", "td" if i else "th", "C" * 40, i, i)
+    def test_table_rows_stay_together_when_they_fit(self) -> None:
+        rows = [
+            _segment(
+                f"r{i}",
+                "th" if i == 0 else "td",
+                "C" * 40,
+                i,
+                i,
+                {
+                    "block_kind": "table_row",
+                    "table_id": "t0",
+                    "is_header": i == 0,
+                    "table_header": "| h |",
+                },
+            )
             for i in range(4)
         ]
-        bundles = self._bundles(cells, _config(max_bundle_chars=100, max_bundle_segments=2))
+        bundles = self._bundles(rows, _config(max_bundle_tokens=60))
         self.assertEqual(len(bundles), 1)
-        self.assertEqual(len(bundles[0].segments), 4)
+        self.assertEqual([segment.segment_id for segment in bundles[0].segments], ["r0", "r1", "r2", "r3"])
 
-    def test_table_cells_split_only_at_hard_cap(self) -> None:
-        cells = [
-            _segment(f"c{i}", "td", "C" * 40, i, i)
+    def test_table_splits_only_at_row_boundaries_and_keeps_header_first(self) -> None:
+        rows = [
+            _segment(
+                f"r{i}",
+                "th" if i == 0 else "td",
+                "C" * 40,
+                i,
+                i,
+                {
+                    "block_kind": "table_row",
+                    "table_id": "t0",
+                    "is_header": i == 0,
+                    "table_header": "| h |",
+                },
+            )
             for i in range(6)
         ]
-        bundles = self._bundles(cells, _config(max_bundle_chars=100, max_bundle_segments=2))
-        self.assertEqual([len(bundle.segments) for bundle in bundles], [4, 2])
+        bundles = self._bundles(rows, _config(max_bundle_tokens=30))
+        self.assertEqual([segment.segment_id for segment in bundles[0].segments], ["r0", "r1"])
+        flattened = [segment.segment_id for bundle in bundles for segment in bundle.segments]
+        self.assertEqual(flattened, [f"r{i}" for i in range(6)])
+        self.assertTrue(all(estimate_tokens_of(b.segments) <= 30 for b in bundles))
 
-    def test_line_gap_ends_table_cohesion(self) -> None:
-        cells = [
+    def test_line_gap_ends_table_group(self) -> None:
+        rows = [
             _segment("c0", "td", "C" * 40, 0, 0),
             _segment("c1", "td", "C" * 40, 1, 1),
             _segment("c2", "td", "C" * 40, 10, 10),
         ]
-        bundles = self._bundles(cells, _config(max_bundle_chars=100, max_bundle_segments=2))
+        bundles = self._bundles(rows, _config(max_bundle_tokens=30))
         self.assertEqual([len(bundle.segments) for bundle in bundles], [2, 1])
+
+    def test_oversized_paragraph_splits_by_lines_and_keeps_source_order(self) -> None:
+        text = "line one. " * 40 + "\n" + "line two. " * 40 + "\n" + "line three."
+        segments = [_segment("s0", "paragraph", text, 0, 2)]
+        bundles = self._bundles(segments, _config(max_bundle_tokens=120))
+        flattened = [segment for bundle in bundles for segment in bundle.segments]
+        self.assertGreater(len(flattened), 1)
+        self.assertTrue(all(segment.segment_id.startswith("s0~") for segment in flattened))
+        rebuilt = "".join(segment.source_text + segment.metadata.get("split_sep", "") for segment in flattened)
+        self.assertEqual(rebuilt, text)
+        self.assertTrue(all(estimate_tokens_of(b.segments) <= 120 for b in bundles))
+
+    def test_min_bundle_tokens_merges_small_trailing_bundle(self) -> None:
+        segments = [
+            _segment("s0", "paragraph", "A" * 400, 0, 0),
+            _segment("s1", "heading", "Section B", 2, 2),
+            _segment("s2", "paragraph", "tiny", 4, 4),
+        ]
+        bundles = self._bundles(segments, _config(max_bundle_tokens=180, min_bundle_tokens=180))
+        self.assertEqual(len(bundles), 1)
 
     def test_bundle_summary_covers_head_and_tail(self) -> None:
         segments = [
@@ -282,6 +349,19 @@ class PromptCoherenceTests(unittest.TestCase):
         self.assertEqual(neighbors["prev"]["segment_id"], "s0")
         self.assertEqual(neighbors["prev"]["text"], "T:first")
         self.assertEqual(neighbors["next"]["segment_id"], "s2")
+
+    def test_bundle_carries_a_shared_block_once(self) -> None:
+        block = "```python\nprint('x')\n```"
+        segments = [
+            _segment("s0", "paragraph", "Run this:", 0, 0, {"context_after": [block]}),
+            _segment("s1", "paragraph", "The output is x.", 2, 2, {"context_before": [block]}),
+        ]
+        bundle = SegmentBundle(bundle_id="b", segments=segments, summary_before="", summary_after="", style_instructions=[])
+        _, user_prompt = build_translator_prompts(bundle, self._context(), "zh-CN")
+        payload = json.loads(user_prompt)
+        self.assertEqual(list(payload["blocks"].values()), [block])
+        self.assertEqual(payload["segments"][0]["context_after"], ["b0"])
+        self.assertEqual(payload["segments"][1]["context_before"], ["b0"])
 
     def test_glossary_prompt_shape(self) -> None:
         system_prompt, user_prompt = build_glossary_prompts(self._context(), "sample text about agents", "zh-CN")

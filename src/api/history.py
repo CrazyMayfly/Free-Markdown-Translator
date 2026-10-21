@@ -34,31 +34,103 @@ CREATE TABLE IF NOT EXISTS jobs (
 def rerender_markdown(markdown: str, segments: list[dict[str, Any]], edits: dict[str, str]) -> str:
     """Rebuild the translated document after in-place segment edits.
 
-    Segments are in document order, so each one's stored ``translated`` text
-    is located monotonically forward through the markdown; that keeps duplicate
-    segment texts unambiguous. Segments listed in ``edits`` (by segment_id) are
-    spliced out in favor of their new text; the caller persists the new text
-    onto the segment itself afterwards.
+    New results carry the exact output span of every segment (``output_start``
+    / ``output_end``), so edits are applied by offset and duplicate translated
+    text can never shift the wrong occurrence. Old history records fall back to
+    searching for each segment's text in document order; that path never
+    duplicates text when a segment cannot be found (e.g. a legacy table row).
     """
+    if not edits:
+        return markdown
+
+    remaining = dict(edits)
+    markdown = _rerender_with_spans(markdown, segments, remaining)
+    return _rerender_by_search(markdown, segments, remaining)
+
+
+def _segment_span(segment: dict[str, Any], markdown: str) -> tuple[int, int] | None:
+    start = segment.get("output_start")
+    end = segment.get("output_end")
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None
+    if start < 0 or end < start or end > len(markdown):
+        return None
+    current = segment.get("translated") or ""
+    if markdown[start:end] != current:
+        return None
+    return start, end
+
+
+def _rerender_with_spans(markdown: str, segments: list[dict[str, Any]], remaining: dict[str, str]) -> str:
+    targets: list[tuple[int, int, dict[str, Any], str]] = []
+    for segment in segments:
+        segment_id = segment.get("segment_id")
+        if not isinstance(segment_id, str) or segment_id not in remaining:
+            continue
+        span = _segment_span(segment, markdown)
+        if span is None:
+            continue
+        targets.append((span[0], span[1], segment, remaining[segment_id]))
+
+    for start, end, segment, new_text in sorted(targets, key=lambda item: item[0], reverse=True):
+        current = markdown[start:end]
+        if current != (segment.get("translated") or ""):
+            continue
+        markdown = markdown[:start] + new_text + markdown[end:]
+        delta = len(new_text) - (end - start)
+        segment["translated"] = new_text
+        segment["output_end"] = start + len(new_text)
+        for other in segments:
+            if other is segment:
+                continue
+            other_start = other.get("output_start")
+            other_end = other.get("output_end")
+            if not isinstance(other_start, int) or not isinstance(other_end, int):
+                continue
+            if other_start >= end:
+                other["output_start"] = other_start + delta
+                other["output_end"] = other_end + delta
+            elif other_end > start:
+                # Overlapping spans are not editable by offset; drop them so
+                # the next pass uses the text-search fallback.
+                other.pop("output_start", None)
+                other.pop("output_end", None)
+        remaining.pop(str(segment.get("segment_id")), None)
+    return markdown
+
+
+def _rerender_by_search(markdown: str, segments: list[dict[str, Any]], remaining: dict[str, str]) -> str:
+    if not remaining:
+        return markdown
     parts: list[str] = []
     cursor = 0
+    changed = False
     for segment in segments:
         current = segment.get("translated") or ""
         if not current:
             continue
         idx = markdown.find(current, cursor)
         if idx < 0:
-            idx = markdown.find(current)
-            if idx < 0:
-                continue  # already replaced by an earlier edit; keep going
+            # A previous pass may have replaced this occurrence. Skipping is
+            # safer than searching from zero and duplicating the text.
+            continue
         parts.append(markdown[cursor:idx])
         segment_id = segment.get("segment_id")
-        if isinstance(segment_id, str) and segment_id in edits:
-            parts.append(edits[segment_id])
+        if isinstance(segment_id, str) and segment_id in remaining:
+            parts.append(remaining.pop(segment_id))
+            segment.pop("output_start", None)
+            segment.pop("output_end", None)
+            changed = True
         else:
             parts.append(current)
         cursor = idx + len(current)
     parts.append(markdown[cursor:])
+    if changed:
+        # Rebuilding by text search may move every later offset; stale spans
+        # would target the wrong text, so force the next edit back to search.
+        for segment in segments:
+            segment.pop("output_start", None)
+            segment.pop("output_end", None)
     return "".join(parts)
 
 

@@ -7,6 +7,7 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
+from src.core.tokens import TOKEN_ESTIMATOR_VERSION
 from src.core.types import TranslationResult
 
 
@@ -75,20 +76,30 @@ class JobCheckpointStore:
             state_path = self._state_path(input_path, target_lang)
             state_path.unlink(missing_ok=True)
 
-    @staticmethod
+    # Bump when segmentation itself changes (not just its parameters): bundle
+    # boundaries and segment ids must never be resumed across versions.
+    # structure-v3: budgets moved from characters to estimated tokens.
+    SEGMENTATION_VERSION = "structure-v3"
+
+    @classmethod
     def fingerprint(
+        cls,
         model: str,
         tone: str,
         audience: str,
         mode: str,
-        max_bundle_chars: int | None = None,
-        max_bundle_segments: int | None = None,
-        section_align_min_chars: int | None = None,
+        max_bundle_tokens: int | None = None,
+        min_bundle_tokens: int | None = None,
     ) -> str:
         # Segmentation params are part of the key: they decide bundle
         # boundaries, so a checkpoint written under different boundaries must
-        # not be resumed against newly built bundles.
+        # not be resumed against newly built bundles. The estimator version is
+        # included because the same budget maps to different text when the
+        # estimator weights change.
         raw = f"{model}\x00{tone}\x00{audience}\x00{mode}"
-        if max_bundle_chars is not None:
-            raw += f"\x00seg\x00{max_bundle_chars}\x00{max_bundle_segments}\x00{section_align_min_chars}"
+        if max_bundle_tokens is not None:
+            raw += (
+                f"\x00seg\x00{cls.SEGMENTATION_VERSION}\x00{TOKEN_ESTIMATOR_VERSION}"
+                f"\x00{max_bundle_tokens}\x00{min_bundle_tokens}"
+            )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

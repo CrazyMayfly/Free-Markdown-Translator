@@ -155,6 +155,50 @@ class AstAndPipelineTests(unittest.TestCase):
         self.assertIn("`code`", result.translated_text)
         self.assertIn("https://example.com", result.translated_text)
 
+    def test_pipeline_emits_one_segment_per_table_row(self) -> None:
+        markdown = "# Doc\n\n| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n"
+        pipeline = TranslationPipeline(
+            config=self.config,
+            parser=self.parser,
+            extractor=self.extractor,
+            translator_agent=TranslatorAgent(self.provider),
+            reviewer_agent=ReviewerAgent(self.provider),
+            format_guard_agent=FormatGuardAgent(self.provider),
+            validator=MarkdownValidator(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "table.md"
+            input_path.write_text(markdown, encoding="utf-8")
+            result = pipeline.run(input_path, "zh-CN", write_output=False)
+
+        rows = [segment for segment in result.segments if segment.metadata.get("block_kind") == "table_row"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(len({row.line_start for row in rows}), 3)
+        self.assertTrue(result.validation.passed)
+
+    def test_pipeline_splits_oversized_block_by_line_without_changing_line_count(self) -> None:
+        long_paragraph = "\n".join(f"Source line {index} with a few words." for index in range(40))
+        markdown = f"# Doc\n\n{long_paragraph}\n\nEnd.\n"
+        self.config.segmentation.max_bundle_tokens = 90
+        self.config.segmentation.min_bundle_tokens = 0
+        pipeline = TranslationPipeline(
+            config=self.config,
+            parser=self.parser,
+            extractor=self.extractor,
+            translator_agent=TranslatorAgent(self.provider),
+            reviewer_agent=ReviewerAgent(self.provider),
+            format_guard_agent=FormatGuardAgent(self.provider),
+            validator=MarkdownValidator(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "long.md"
+            input_path.write_text(markdown, encoding="utf-8")
+            result = pipeline.run(input_path, "zh-CN", write_output=False)
+
+        self.assertTrue(result.validation.passed)
+        self.assertGreater(len(result.segments), 2)
+        self.assertEqual(len(result.translated_text.splitlines()), len(markdown.splitlines()))
+
     def test_default_output_path_uses_primary_language_tag(self) -> None:
         pipeline = TranslationPipeline(
             config=self.config,

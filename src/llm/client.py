@@ -92,7 +92,7 @@ def _check_truncation(response, call_label: str, max_tokens: int) -> None:
     if finish_reason == "length":
         raise LLMResponseTruncatedError(
             f"LLM response for '{call_label}' was truncated by max_tokens={max_tokens} "
-            "before completing valid JSON; increase provider.max_tokens or reduce segmentation.max_bundle_chars"
+            "before completing valid JSON; increase provider.max_tokens or reduce segmentation.max_bundle_tokens"
         )
 
 

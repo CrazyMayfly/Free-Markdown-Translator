@@ -317,6 +317,9 @@ class AnchorSchedulingTests(unittest.TestCase):
 
         provider = PromptCaptureProvider()
         config = _config()
+        # Keep one bundle per section: the default min_bundle_tokens (800) would
+        # merge these two ~240-token sections into a single bundle.
+        config.segmentation.min_bundle_tokens = 0
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "anchors.md"
             input_path.write_text(markdown, encoding="utf-8")
@@ -336,7 +339,7 @@ class AnchorSchedulingTests(unittest.TestCase):
         provider = PromptCaptureProvider()
         config = _config()
         # Force several bundles so a non-anchor bundle exists after section B.
-        config.segmentation.max_bundle_chars = 800
+        config.segmentation.max_bundle_tokens = 240
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "anchors.md"
             input_path.write_text(markdown, encoding="utf-8")
@@ -357,7 +360,7 @@ class AnchorSchedulingTests(unittest.TestCase):
 
         provider = PromptCaptureProvider()
         config = _config(enable_anchor_scheduling=False)
-        config.segmentation.max_bundle_chars = 800
+        config.segmentation.max_bundle_tokens = 240
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "anchors.md"
             input_path.write_text(markdown, encoding="utf-8")

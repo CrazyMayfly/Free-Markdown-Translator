@@ -38,13 +38,37 @@ def _document_context_payload(context: DocumentContext) -> dict:
     return payload
 
 
+def _block_registry(bundle: SegmentBundle) -> dict[str, str]:
+    """Deduplicate adjacent code/HTML blocks across one bundle.
+
+    A block is adjacency for the paragraph above *and* the paragraph below, so
+    inlining it per segment shipped the same text twice whenever both segments
+    landed in the same bundle — measured at ~50% of all context tokens. The
+    bundle now carries each block once and segments point at it by id.
+    """
+    registry: dict[str, str] = {}
+    seen: set[str] = set()
+    for segment in bundle.segments:
+        for key in ("context_before", "context_after"):
+            for text in segment.metadata.get(key) or []:
+                if text in seen:
+                    continue
+                seen.add(text)
+                registry[f"b{len(registry)}"] = str(text)
+    return registry
+
+
 def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, target_lang: str) -> tuple[str, str]:
     system_prompt = (
         f"You are an expert Markdown translation specialist. Detect the source language automatically and translate markdown text to {target_lang}. "
         "Input JSON fields: task=job type, ctx=shared document hints, prev_summary=source digest of the preceding bundle (for continuity), "
         "anchor_translations=already-translated segments that open the current section (match their terminology and tone), "
+        "blocks=read-only code or HTML blocks referenced by this bundle (never translate them), "
         "segments=list of units to translate, segment_id=stable output key, context=local section path, text=source text, "
-        "similar=prior translations of similar source text for this segment (follow their choices unless clearly wrong). "
+        "context_before/context_after=list of block ids adjacent to the segment (read-only; use them only to resolve phrases such as "
+        "\"this code\" or \"the output above\"), "
+        "similar=prior translations of similar source text for this segment (follow their choices unless clearly wrong), "
+        "table_header=raw header row for a table row (read-only context; never translate it). "
         'Return JSON with "translations" (one object per input segment) and "context_requests": if some segment cannot be translated '
         "confidently with the context shown, list {segment_id, need: similar_translations|neighbour_translations, reason} for it "
         "and translate the rest normally; the missing context will be fetched and the bundle translated once more. "
@@ -52,6 +76,8 @@ def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, ta
         "Translate only text, **preserve placeholders**, URLs, code, and markdown control syntax exactly, and follow ctx.style_guide including term preservation. "
         "Use ctx.glossary renderings verbatim and report every domain term you rendered in applied_terms."
     )
+    blocks = _block_registry(bundle)
+    block_ids = {text: block_id for block_id, text in blocks.items()}
     payload: dict[str, object] = {
         "task": "translate",
         "ctx": _document_context_payload(context),
@@ -59,6 +85,8 @@ def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, ta
     }
     if bundle.anchor_translations:
         payload["anchor_translations"] = bundle.anchor_translations
+    if blocks:
+        payload["blocks"] = blocks
     segments_payload: list[dict[str, object]] = []
     for segment in bundle.segments:
         entry: dict[str, object] = {
@@ -69,6 +97,14 @@ def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, ta
         similar = bundle.similar_examples.get(segment.segment_id)
         if similar:
             entry["similar"] = similar
+        if not segment.metadata.get("is_header") and segment.metadata.get("table_header"):
+            entry["table_header"] = segment.metadata["table_header"]
+        before_refs = [block_ids[text] for text in segment.metadata.get("context_before") or [] if text in block_ids]
+        if before_refs:
+            entry["context_before"] = before_refs
+        after_refs = [block_ids[text] for text in segment.metadata.get("context_after") or [] if text in block_ids]
+        if after_refs:
+            entry["context_after"] = after_refs
         segments_payload.append(entry)
     payload["segments"] = segments_payload
     return system_prompt, _compact_json(payload)

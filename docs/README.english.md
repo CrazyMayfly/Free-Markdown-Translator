@@ -155,10 +155,10 @@ pipeline:
   enable_format_guard: false
   # Whether to report an error directly when output validation fails.
   fail_on_validation_error: true
-# Segmentation strategy. Controls the size of the text bundle sent to the model at once.
+# Segmentation strategy. Packs along Markdown structure (headings/lists/tables/quotes), then splits oversized blocks by line.
 segmentation:
-  max_bundle_chars: 6000
-  max_bundle_segments: 36
+  max_bundle_tokens: 3000
+  min_bundle_tokens: 800
 # Input rules.
 input:
   # When a directory is passed, recursively match files that need translation.

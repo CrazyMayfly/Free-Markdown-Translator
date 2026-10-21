@@ -75,9 +75,8 @@ def _mask_config(config: TranslatorConfig) -> dict[str, Any]:
             "judge_model": config.pipeline.judge_model,
         },
         "segmentation": {
-            "max_bundle_chars": config.segmentation.max_bundle_chars,
-            "max_bundle_segments": config.segmentation.max_bundle_segments,
-            "section_align_min_chars": config.segmentation.section_align_min_chars,
+            "max_bundle_tokens": config.segmentation.max_bundle_tokens,
+            "min_bundle_tokens": config.segmentation.min_bundle_tokens,
         },
         "input": {"file_pattern": config.input.file_pattern},
         "style": {

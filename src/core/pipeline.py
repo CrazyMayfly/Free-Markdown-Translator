@@ -15,6 +15,7 @@ from src.agents.translator_agent import TranslatorAgent
 from src.core.errors import OutputWriteError, TranslationPipelineError
 from src.core.glossary import canonical_glossary, detect_glossary_conflicts
 from src.core.orchestrator import Orchestrator
+from src.core.tokens import estimate_tokens
 from src.core.types import (
     ApiUsageSummary,
     MemoryStore,
@@ -117,6 +118,11 @@ class TranslationPipeline:
         resumed_bundles = self.checkpoint_store.load(input_path, target_lang) if self.checkpoint_store is not None else {}
         context.glossary = await self._build_glossary(context, segments, fingerprint, target_lang, resumed_bundles)
         bundles = self.orchestrator.build_bundles(segments, context, self.config)
+        # The bundler may split one oversized block into several segments that
+        # share a source line range. Everything downstream (rendering, memory,
+        # review, API results) works on that final segment list.
+        segments = [segment for bundle in bundles for segment in bundle.segments]
+        parsed.segments = segments  # type: ignore[attr-defined]
         logging.info("Prepared %s segments in %s bundles", len(segments), len(bundles))
         if resumed_bundles:
             logging.info("Resuming %s: %s/%s bundles already completed", input_path.name, len(resumed_bundles), len(bundles))
@@ -294,12 +300,12 @@ class TranslationPipeline:
         if mode == "strict":
             return True
 
-        bundle_chars = sum(len(segment.source_text) for segment in bundle.segments)
+        bundle_tokens = sum(estimate_tokens(segment.source_text) for segment in bundle.segments)
         low_confidence = any(item.confidence < self.config.pipeline.review_confidence_threshold for item in translations)
         has_notes = any(item.notes for item in translations)
         return (
             len(bundle.segments) >= self.config.pipeline.review_min_segments
-            or bundle_chars >= self.config.pipeline.review_min_bundle_chars
+            or bundle_tokens >= self.config.pipeline.review_min_bundle_tokens
             or low_confidence
             or has_notes
         )
@@ -318,6 +324,14 @@ class TranslationPipeline:
 
     def _render_and_validate(self, parsed, segments, translations):
         updated = self.mapper.apply(parsed, translations)
+        spans = updated.metadata.pop("segment_spans", {})
+        for segment in segments:
+            span = spans.get(segment.segment_id)
+            if span is not None:
+                segment.metadata["output_start"], segment.metadata["output_end"] = span
+            else:
+                segment.metadata.pop("output_start", None)
+                segment.metadata.pop("output_end", None)
         updated.segments = segments  # type: ignore[attr-defined]
         output_text = self.renderer.render(updated)
         # Heading anchors change once headings are translated; remap
@@ -413,7 +427,7 @@ class TranslationPipeline:
                     continue
                 updated_by_id[item.segment_id] = item
                 segment = segment_lookup.get(item.segment_id)
-                if segment is not None:
+                if segment is not None and not segment.metadata.get("split_parent"):
                     self.memory.store(segment.source_text, target_lang, item.translated_text, fingerprint, item.confidence, style_key)
         if self.glossary_store is not None:
             # Canonical renderings become the durable answer for next runs.
@@ -432,8 +446,18 @@ class TranslationPipeline:
         return translations
 
     @staticmethod
-    def _is_anchor_bundle(index: int, bundle: SegmentBundle) -> bool:
-        return index == 0 or bool(bundle.segments and bundle.segments[0].node_type == "heading")
+    def _is_anchor_bundle(index: int, bundle: SegmentBundle, bundles: list[SegmentBundle]) -> bool:
+        if index == 0:
+            return True
+        if not bundle.segments or bundle.segments[0].node_type != "heading":
+            return False
+        # A section that fits in one bundle needs no anchor: it already has the
+        # whole section in front of the model. Only the first piece of a
+        # section split across bundles anchors its continuation bundles.
+        if index + 1 >= len(bundles):
+            return False
+        next_bundle = bundles[index + 1]
+        return bool(next_bundle.segments and next_bundle.segments[0].node_type != "heading")
 
     async def _translate_bundles(
         self,
@@ -484,25 +508,30 @@ class TranslationPipeline:
         anchor_results: dict[str, list[TranslationResult]] = {}
         anchor_of: dict[str, SegmentBundle | None] = {}
         current_anchor: SegmentBundle | None = None
+        current_section: object = None
         for index, bundle in enumerate(bundles):
-            if self._is_anchor_bundle(index, bundle):
+            section = bundle.segments[-1].metadata.get("section_id") if bundle.segments else None
+            if self._is_anchor_bundle(index, bundle, bundles):
                 current_anchor = bundle
+                current_section = section
+            elif section != current_section:
+                current_anchor = None
             anchor_of[bundle.bundle_id] = current_anchor
 
         logging.info(
             "Translating %s bundles (concurrency=%s, anchors=%s)",
             len(bundles),
             getattr(limit, "_value", "?"),
-            sum(1 for index, bundle in enumerate(bundles) if self._is_anchor_bundle(index, bundle)) if anchor_scheduling else "off",
+            sum(1 for index, bundle in enumerate(bundles) if self._is_anchor_bundle(index, bundle, bundles)) if anchor_scheduling else "off",
         )
         if anchor_scheduling:
             # Phase 1: each section's anchor bundle runs sequentially in
             # document order, so its real translations exist as context.
             for index, bundle in enumerate(bundles):
-                if self._is_anchor_bundle(index, bundle):
+                if self._is_anchor_bundle(index, bundle, bundles):
                     anchor_results[bundle.bundle_id] = await worker(bundle)
             # Phase 2: everything else runs in parallel carrying the anchor.
-            others = [bundle for index, bundle in enumerate(bundles) if not self._is_anchor_bundle(index, bundle)]
+            others = [bundle for index, bundle in enumerate(bundles) if not self._is_anchor_bundle(index, bundle, bundles)]
             async with asyncio.TaskGroup() as task_group:
                 futures = [
                     task_group.create_task(self._anchored_worker(worker, bundle, anchor_of.get(bundle.bundle_id), anchor_results, attach_anchor_context))
@@ -657,8 +686,13 @@ class TranslationPipeline:
         for item in ordered:
             if item.notes in (["translation-memory"], ["translation-memory-fuzzy"]):
                 continue
+            segment = segment_lookup[item.segment_id]
+            if segment.metadata.get("split_parent"):
+                # Fragments are an implementation detail of line splitting;
+                # remembering them would poison later runs with partial units.
+                continue
             self.memory.store(
-                segment_lookup[item.segment_id].source_text,
+                segment.source_text,
                 target_lang,
                 item.translated_text,
                 fingerprint,

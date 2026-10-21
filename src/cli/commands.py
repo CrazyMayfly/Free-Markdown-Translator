@@ -211,9 +211,8 @@ def _task_checkpoint_store(task: TranslationTask, config: TranslatorConfig, chec
         tone=config.style.tone,
         audience=config.style.audience,
         mode=config.pipeline.mode,
-        max_bundle_chars=config.segmentation.max_bundle_chars,
-        max_bundle_segments=config.segmentation.max_bundle_segments,
-        section_align_min_chars=config.segmentation.section_align_min_chars,
+        max_bundle_tokens=config.segmentation.max_bundle_tokens,
+        min_bundle_tokens=config.segmentation.min_bundle_tokens,
     )
     return JobCheckpointStore(checkpoint_dir, fingerprint)
 

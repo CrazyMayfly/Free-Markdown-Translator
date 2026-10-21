@@ -274,7 +274,8 @@ class ConfigRouteTests(unittest.TestCase):
                 self.assertTrue(pipeline[key])
             self.assertIn("reviewer_model", pipeline)
             self.assertIn("judge_model", pipeline)
-            self.assertIn("section_align_min_chars", data["config"]["segmentation"])
+            self.assertIn("max_bundle_tokens", data["config"]["segmentation"])
+            self.assertIn("min_bundle_tokens", data["config"]["segmentation"])
             self.assertIn("scope", data["config"]["memory"])
 
         self._run(scenario())

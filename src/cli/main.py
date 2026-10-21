@@ -111,8 +111,8 @@ def _log_startup_config(args: argparse.Namespace, config: TranslatorConfig) -> N
         config.pipeline.fail_on_validation_error,
         config.input.file_pattern,
         config.execution.max_parallel_translations,
-        config.segmentation.max_bundle_chars,
-        config.segmentation.max_bundle_segments,
+        config.segmentation.max_bundle_tokens,
+        config.segmentation.min_bundle_tokens,
         config.output.write_report,
     )
 

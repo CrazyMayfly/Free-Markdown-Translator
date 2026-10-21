@@ -83,6 +83,26 @@ class RerenderTests(unittest.TestCase):
         segments = [{"segment_id": "s1", "translated": "missing"}]
         self.assertEqual(rerender_markdown("# T\n\nkeep\n", segments, {}), "# T\n\nkeep\n")
 
+    def test_span_edits_do_not_duplicate_identical_text(self) -> None:
+        markdown = "# T\n\nalpha\n\nalpha\n"
+        segments = [
+            {"segment_id": "s1", "translated": "alpha", "output_start": 5, "output_end": 10},
+            {"segment_id": "s2", "translated": "alpha", "output_start": 12, "output_end": 17},
+        ]
+        edited = rerender_markdown(markdown, segments, {"s1": "one", "s2": "two"})
+        self.assertEqual(edited, "# T\n\none\n\ntwo\n")
+        self.assertEqual(markdown, "# T\n\nalpha\n\nalpha\n")
+
+    def test_span_edits_shift_later_offsets_for_the_next_edit(self) -> None:
+        markdown = "# T\n\nalpha\n\nalpha\n"
+        segments = [
+            {"segment_id": "s1", "translated": "alpha", "output_start": 5, "output_end": 10},
+            {"segment_id": "s2", "translated": "alpha", "output_start": 12, "output_end": 17},
+        ]
+        first = rerender_markdown(markdown, segments, {"s1": "a much longer first line"})
+        second = rerender_markdown(first, segments, {"s2": "two"})
+        self.assertEqual(second, "# T\n\na much longer first line\n\ntwo\n")
+
 
 class HistoryPersistenceTests(unittest.TestCase):
     def test_job_survives_new_app_instance(self) -> None:

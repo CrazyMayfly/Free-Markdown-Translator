@@ -50,7 +50,10 @@ class PipelineConfig:
     enable_review: bool = False
     enable_format_guard: bool = False
     fail_on_validation_error: bool = True
-    review_min_bundle_chars: int = 1600
+    # Estimated source tokens per bundle above which a bundle is reviewed
+    # automatically in balanced mode. Counted in tokens (see
+    # src/core/tokens.py) so the trigger does not drift with the language.
+    review_min_bundle_tokens: int = 1200
     review_min_segments: int = 6
     review_confidence_threshold: float = 0.85
     # Reflect->improve rounds per bundle; rounds > 1 re-verify every fix.
@@ -78,11 +81,21 @@ class PipelineConfig:
 
 @dataclass
 class SegmentationConfig:
-    max_bundle_chars: int = 6000
-    max_bundle_segments: int = 12
-    # Start a new bundle at a heading once the current bundle reaches this
-    # many source characters, so bundle boundaries follow sections.
-    section_align_min_chars: int = 400
+    # Hard ceiling for one bundle (and for one segment after line splitting),
+    # counted in estimated source tokens. Bundles are packed along Markdown
+    # structure first; this only decides when a structural block is too large
+    # and has to be split by line.
+    #
+    # 3000 is about 45% of the default provider.max_tokens (8000). Translated
+    # output costs roughly as many tokens as the source, so this leaves room
+    # for the JSON envelope and for one retry without hitting the cap. Raise it
+    # together with max_tokens, not on its own.
+    max_bundle_tokens: int = 3000
+    # Merge small sections/trailing bundles until they reach this many tokens.
+    # Roughly the fixed prompt overhead (system + schema + context), so a
+    # bundle can carry at least as much translatable text as scaffolding.
+    # 0 disables the merge.
+    min_bundle_tokens: int = 800
 
 
 @dataclass
@@ -188,7 +201,7 @@ def _default_config_dict() -> dict[str, Any]:
             "enable_review": False,
             "enable_format_guard": False,
             "fail_on_validation_error": True,
-            "review_min_bundle_chars": 1600,
+            "review_min_bundle_tokens": 1200,
             "review_min_segments": 6,
             "review_confidence_threshold": 0.85,
             "review_max_rounds": 2,
@@ -204,9 +217,8 @@ def _default_config_dict() -> dict[str, Any]:
             "final_edit_max_segments": 300,
         },
         "segmentation": {
-            "max_bundle_chars": 6000,
-            "max_bundle_segments": 12,
-            "section_align_min_chars": 400,
+            "max_bundle_tokens": 3000,
+            "min_bundle_tokens": 800,
         },
         "input": {
             "file_pattern": "*.md",
@@ -278,8 +290,8 @@ pipeline:
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
   # 以下为 balanced 模式下按条件触发审校的阈值。
-  # bundle 字符数达到该值时触发审校。
-  review_min_bundle_chars: 1600
+  # bundle 估算 token 数达到该值时触发审校（1200 token ≈ 1600 汉字 ≈ 4000 英文字符）。
+  review_min_bundle_tokens: 1200
   # bundle 段落数达到该值时触发审校。
   review_min_segments: 6
   # 翻译结果置信度低于该值时触发审校。
@@ -305,12 +317,17 @@ pipeline:
   # 终审最多覆盖的段落数（控制成本）。
   final_edit_max_segments: 300
 
-# 分段策略。控制一次发送给模型的文本包大小。
+# 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
+# 预算单位是估算 token 而不是字符：同样 6000 字符，中文约 4200 token、英文约 1800 token，
+# 用字符做预算会让中英文的实际风险差 2 倍以上。
 segmentation:
-  max_bundle_chars: 6000
-  max_bundle_segments: 12
-  # 当前文本包达到该字符数后，遇到标题即开新包，使分包边界对齐章节结构。
-  section_align_min_chars: 400
+  # 单个文本包的硬上限（估算源 token），也是超长块按行拆分的阈值。
+  # 3000 约为 provider.max_tokens（默认 8000）的 45%：译文 token 数与源文大致相当，
+  # 剩下的余量留给 JSON 封套和一次重试。要调大请连同 max_tokens 一起调。
+  max_bundle_tokens: 3000
+  # 小章节/尾包合并到该 token 数为止；0 表示不合并。
+  # 约等于每包固定 prompt 开销，保证正文至少和脚手架一样多。
+  min_bundle_tokens: 800
 
 # 输入规则。
 input:
@@ -379,11 +396,38 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
         return yaml.safe_load(handle) or {}
 
 
+_DEPRECATED_KEYS = {
+    ("segmentation", "max_bundle_segments"): (
+        "bundles are packed along Markdown structure; segment count no longer controls chunking"
+    ),
+    ("segmentation", "section_align_min_chars"): (
+        "headings are structural boundaries now; small bundles are merged via min_bundle_tokens"
+    ),
+    ("segmentation", "max_bundle_chars"): (
+        "budgets are counted in tokens now; rename to max_bundle_tokens (6000 chars is roughly "
+        "1800 tokens of English or 4200 tokens of Chinese)"
+    ),
+    ("segmentation", "min_bundle_chars"): (
+        "budgets are counted in tokens now; rename to min_bundle_tokens (600 chars is roughly "
+        "180 tokens of English or 420 tokens of Chinese)"
+    ),
+    ("pipeline", "review_min_bundle_chars"): (
+        "budgets are counted in tokens now; rename to review_min_bundle_tokens (1600 chars is "
+        "roughly 1200 tokens of Chinese)"
+    ),
+}
+
+
 def _filter_known_keys(section: dict[str, Any], config_type, section_name: str) -> dict[str, Any]:
     allowed = {item.name for item in fields(config_type)}
     unknown = sorted(set(section) - allowed)
     if unknown:
-        logging.warning("Ignoring unsupported config keys in %s: %s", section_name, ", ".join(unknown))
+        for key in unknown:
+            reason = _DEPRECATED_KEYS.get((section_name, key))
+            if reason:
+                logging.warning("Deprecated config key %s.%s ignored: %s", section_name, key, reason)
+            else:
+                logging.warning("Ignoring unsupported config key %s.%s", section_name, key)
     return {key: value for key, value in section.items() if key in allowed}
 
 
