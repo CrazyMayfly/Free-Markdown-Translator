@@ -1,23 +1,31 @@
 ![Free-Markdown-Translator](https://socialify.git.ci/CrazyMayfly/Free-Markdown-Translator/image?custom_description=Free+Markdown+Translator%E6%98%AF%E4%B8%80%E6%AC%BE%E5%9F%BA%E4%BA%8E+AI+Agent+%E6%B5%81%E6%B0%B4%E7%BA%BF%E7%9A%84+Markdown+%E6%96%87%E6%A1%A3%E7%BF%BB%E8%AF%91%E5%99%A8&description=1&font=Bitter&forks=1&language=1&name=1&owner=1&pattern=Solid&stargazers=1&theme=Auto)
 
-[English](docs/README.english.md) |  [Deutsch](docs/README.german.md) | [日本語](docs/README.japanese.md) | [русский](docs/README.russian.md) | [한국어](docs/README.korean.md) | [Português](docs/README.portuguese.md) | [Español](docs/README.spanish.md) | [Français](docs/README.french.md) | [हिन्दी](docs/README.hindi.md) | [العربية](docs/README.arabic.md)
 
 # Free Markdown Translator
 
 基于 AI Agent 流水线的 Markdown 文档翻译工具：支持 40+ 语言，保留原始文档结构，保持语义连贯。
+![新建任务](docs/screenshots/submit.png)
 
 ## 特性
 
-| 领域 | 能力 |
-| --- | --- |
-| 🈯️ 术语一致 | 译前抽取术语表、译后修正漂移译法；持久化术语库跨运行累积，人工条目优先于模型投票（`/api/glossary` 可管理） |
-| 🔗 上下文连贯 | 分包对齐章节边界（表格不拆包）；每包携带文档大纲、术语表、前一包摘要；锚点调度为并行包注入真实译文；模型可主动请求更深的记忆检索；文内锚点链接自动跟随译后标题 |
-| ✅ 质量保障 | 反思式审校（批评 → 修复 → 复核）；语义哨兵（占位符/数字守恒、长度比）零成本拦截丢内容；`quality` 模式文档级终审；`--eval` LLM-as-judge 打分；`--regression` 黄金样例回归 |
-| 💰 成本效率 | 翻译记忆（相同段落零调用复用、相似段落模糊复用或作 few-shot）；`--resume` 断点续传；asyncio 并发 + 限流退避 |
-| 🧱 结构稳定 | Structured Outputs 受限解码（端点不支持自动降级）；截断精确识别；代码/URL/表格/标题占位符保护；校验失败自动格式修复 |
-| 🔌 灵活集成 | 任意 OpenAI 兼容端点（OpenRouter / DeepSeek / Ollama / vLLM…）；审校与评审可配独立模型；`--serve` MCP 模式；桌面应用 |
+- 🈯️ 术语一致
+- 🔗 上下文连贯
+- - ✅ 质量保障 
+- 💰 成本效率
+- 🧱 结构稳定 
 
 三档模式：`fast`（省 token 提速）、`balanced`（默认）、`quality`（全量审校 + 终审）。
+
+
+## 🖥️ 桌面应用
+
+到 [Releases](https://github.com/CrazyMayfly/Free-Markdown-Translator/releases) 下载安装包：
+
+首次启动后在「配置」页填入 base_url / API Key / 模型，用「测试连接」验证后即可开始翻译。
+
+| 新建任务 | 任务记录 | 翻译结果 | 分段对照 | 配置 |
+|---|---|---|---|---|
+| ![新建任务](docs/screenshots/submit.png) | ![任务记录](docs/screenshots/jobs.png) | ![翻译结果](docs/screenshots/result.png) | ![分段对照](docs/screenshots/segments.png) | ![配置](docs/screenshots/config.png) |
 
 ## ⚡ Quick Start
 
@@ -41,29 +49,6 @@ mdtx README.md --to Chinese --eval         # 翻译并做质量评估
 mdtx docs --to Chinese --resume            # 从中断处续传
 mdtx --verbose README.md --to Chinese      # 详细日志
 ```
-
-## 🖥️ 桌面应用（Tauri 2 + Vue3 + Python sidecar）
-
-仅监听 `127.0.0.1`，不依赖云服务。到 [Releases](https://github.com/CrazyMayfly/Free-Markdown-Translator/releases) 下载安装包（GitHub Actions 自动构建）：
-
-| 平台 | 产物 |
-|------|------|
-| macOS (Apple Silicon) | `mdtx_3.2.0_aarch64.dmg`（未签名，首次打开需右键 → 打开） |
-| Windows x64 | `mdtx_3.2.0_x64-setup.exe` |
-| Ubuntu/Debian | `mdtx_3.2.0_amd64.deb`（另有通用 `AppImage`） |
-
-首次启动后在「配置」页填入 base_url / API Key / 模型，用「测试连接」验证后即可开始翻译。
-
-| 新建任务 | 任务记录 | 翻译结果 | 分段对照 | 配置 |
-|---|---|---|---|---|
-| ![新建任务](docs/screenshots/submit.png) | ![任务记录](docs/screenshots/jobs.png) | ![翻译结果](docs/screenshots/result.png) | ![分段对照](docs/screenshots/segments.png) | ![配置](docs/screenshots/config.png) |
-
-- **新建任务**：拖拽 / 文件浏览器多选文件或目录（按 `*.md` 递归）、语言多选、三档模式、断点续传
-- **实时进度**：任务 × 翻译对双层进度、bundle 级进度条、token 实时统计（含缓存命中）、阶段时间轴与耗时、SSE 事件流
-- **任务记录**：本机持久化（`~/.mdtx/history.sqlite3`），支持「再来一次」与删除
-- **结果页**：渲染 / 分段对照双视图，段落级修订自动同步全文，一键复制 / 保存 / 访达显示
-- **写失败保护**：输出写失败时译文不丢，结果页可手动保存；后台完成弹系统通知
-- **配置管理**：表单化编辑 `~/.mdtx/config.yaml`（Key 掩码不回显）、端点连通性测试、翻译记忆统计与清空、术语表管理
 
 ### 本地开发
 
@@ -102,7 +87,6 @@ pip install "mdtx[mcp]" && mdtx --serve
 | Ollama（本地） | `http://localhost:11434/v1` |
 | vLLM（本地） | `http://localhost:8000/v1` |
 
-`provider.name` 仅作标识，实际端点由 `base_url` 决定；`structured_outputs: auto`（默认）在端点不支持受限解码时自动回退。
 
 ## ⚙️ 配置
 
