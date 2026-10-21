@@ -2,3 +2,12 @@
 @plugin "daisyui" {
   themes: corporate --default, dim --prefersdark;
 }
+
+/* Native scrollbars/form controls should follow the active theme, not the OS
+   default, otherwise the dark theme keeps light scrollbars. */
+:root {
+  color-scheme: light;
+}
+[data-theme="dim"] {
+  color-scheme: dark;
+}

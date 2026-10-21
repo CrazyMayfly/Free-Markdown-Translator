@@ -4,9 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>mdtx 翻译工作台</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%236366f1'/%3E%3Ctext x='16' y='22' font-family='sans-serif' font-size='16' font-weight='800' fill='white' text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E"
+    />
+    <script>
+      // Apply the saved theme before the app mounts so there is no flash of the
+      // wrong theme, and honour the OS dark preference on first visit instead
+      // of forcing the light theme over it.
+      (function () {
+        try {
+          var saved = localStorage.getItem("mdtx-theme");
+          var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dim" : "corporate");
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;color:#9ca3af">
+        <div style="text-align:center">
+          <div style="font-size:28px;font-weight:800;color:#6366f1;margin-bottom:12px">mdtx</div>
+          <div style="font-size:14px">正在启动后端服务…</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

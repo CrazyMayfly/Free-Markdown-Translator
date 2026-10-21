@@ -301,6 +301,9 @@ class JobManager:
 
 
 def _serialize_result(result, target_lang: str, judge_report: dict | None) -> dict[str, Any]:
+    from src.parser.segment_extractor import ProtectedSpanProcessor
+
+    protector = ProtectedSpanProcessor()
     translations_by_id = {item.segment_id: item for item in result.translations}
     segments = []
     for segment in result.segments:
@@ -308,10 +311,18 @@ def _serialize_result(result, target_lang: str, judge_report: dict | None) -> di
         entry = {
             "segment_id": segment.segment_id,
             "context_path": segment.context_path,
-            "source": segment.source_text,
+            # source_text carries {{MD_0}}-style placeholders; the UI shows
+            # these side-by-side with the restored translation, so restore
+            # them back to the real markdown or users copy placeholders into
+            # their edits.
+            "source": protector.restore(segment.source_text, segment),
             "translated": translation.translated_text if translation else "",
             "confidence": translation.confidence if translation else 0.0,
         }
+        if translation is not None:
+            notes = getattr(translation, "notes", None)
+            if notes:
+                entry["notes"] = notes
         if segment.metadata.get("output_start") is not None:
             entry["output_start"] = segment.metadata["output_start"]
             entry["output_end"] = segment.metadata["output_end"]

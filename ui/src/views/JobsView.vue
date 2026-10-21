@@ -23,6 +23,11 @@ function meta(status: string) {
 }
 
 function formatTime(ts: number) {
+  const diff = (Date.now() - ts * 1000) / 1000;
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
   return new Date(ts * 1000).toLocaleString();
 }
 
@@ -59,6 +64,7 @@ async function reuse(job: JobSummary) {
 }
 
 async function remove(job: JobSummary) {
+  if (!window.confirm("确定要从历史记录中删除该任务吗？（不会删除已产出的译文文件）")) return;
   deletingId.value = job.id;
   try {
     await api.deleteHistory(job.id);
@@ -89,7 +95,10 @@ async function refresh() {
 
 onMounted(() => {
   void refresh();
-  pollTimer = window.setInterval(() => void refresh(), 5000);
+  pollTimer = window.setInterval(() => {
+    if (document.hidden) return; // 后台标签页不刷，省电
+    void refresh();
+  }, 5000);
 });
 
 onBeforeUnmount(() => {

@@ -7,7 +7,8 @@ import { isTauri } from "./tauri";
 
 const router = useRouter();
 const theme = ref<"corporate" | "dim">(
-  (localStorage.getItem("mdtx-theme") as "corporate" | "dim") ?? "corporate",
+  (localStorage.getItem("mdtx-theme") as "corporate" | "dim") ??
+    (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dim" : "corporate"),
 );
 
 function applyTheme(value: "corporate" | "dim") {
@@ -16,7 +17,16 @@ function applyTheme(value: "corporate" | "dim") {
   document.documentElement.setAttribute("data-theme", value);
 }
 
-onMounted(() => applyTheme(theme.value));
+onMounted(() => {
+  applyTheme(theme.value);
+  // The connection banner only reflects the state at startup; a sidecar that
+  // dies later leaves a stale green dot. Re-probe periodically so the sidebar
+  // and banner stay truthful.
+  window.setInterval(() => {
+    if (document.hidden) return;
+    void checkConnection();
+  }, 30000);
+});
 
 function retryConnection() {
   // In the Tauri shell a missed handshake can only be recovered by re-running

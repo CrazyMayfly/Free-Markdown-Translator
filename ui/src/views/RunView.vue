@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api, type JobDetail, type JobSummary } from "../api/client";
 import { useJobEvents, type JobEvent } from "../composables/useSSE";
@@ -19,6 +19,8 @@ const pairProgress = ref({ done: 0, total: 0 });
 const pairLog = ref<{ key: string; input: string; lang: string; done: number; total: number }[]>([]);
 const writeErrors = ref<string[]>([]);
 const usage = ref({ prompt: 0, completion: 0, total: 0, cached: 0, calls: 0 });
+const sseConnected = ref(false);
+const eventBox = ref<HTMLDivElement | null>(null);
 let pollTimer: number | null = null;
 
 const statusMeta = computed(() => {
@@ -83,6 +85,22 @@ function onEvent(event: JobEvent) {
       calls: incoming.calls ?? 0,
     };
   }
+  if (event.type === "pair_start") {
+    // A pair is known the moment it starts (bundles = total count), so show its
+    // progress row immediately instead of waiting for the first bundle to
+    // finish — that first update used to lag a full bundle translation.
+    const key = `${event.input}|${event.lang}`;
+    if (!pairLog.value.some((p) => p.key === key)) {
+      pairLog.value.push({
+        key,
+        input: fileName(event.input ?? ""),
+        lang: event.lang ?? "",
+        done: 0,
+        total: event.bundles ?? event.total ?? 0,
+      });
+    }
+    currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;
+  }
   if (event.type === "progress") {
     currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;
     pairProgress.value = { done: event.done ?? 0, total: event.total ?? 0 };
@@ -132,17 +150,34 @@ async function refresh() {
   }
 }
 
+const cancelling = ref(false);
+
 async function cancel() {
-  await api.cancelJob(jobId);
+  cancelling.value = true;
+  try {
+    await api.cancelJob(jobId);
+  } finally {
+    // Status will flip to "cancelled" via SSE/polling; keep the button muted.
+  }
 }
 
 onMounted(() => {
   void refresh();
   void ensureNotifyPermission();
-  const { connect } = useJobEvents(jobId, onEvent, () => {
+  const { connect, connected } = useJobEvents(jobId, onEvent, () => {
     void refresh();
   });
+  // Reflect the live stream state so a silent drop isn't mistaken for a hang.
+  watch(connected, (value) => (sseConnected.value = value), { immediate: true });
   connect();
+  // Keep the event log pinned to the newest entry.
+  watch(
+    () => events.value.length,
+    () => {
+      const box = eventBox.value;
+      if (box) box.scrollTop = box.scrollHeight;
+    },
+  );
   // Safety net: if SSE dies silently (sleep, network hiccup), keep polling.
   pollTimer = window.setInterval(() => {
     if (!finished.value) void refresh();
@@ -161,9 +196,11 @@ onBeforeUnmount(() => {
       <h1 class="text-lg font-bold">任务 {{ jobId.slice(0, 8) }}</h1>
       <span class="badge" :class="statusMeta.badge">{{ statusMeta.label }}</span>
       <div class="grow"></div>
-      <button v-if="!finished" class="btn btn-sm btn-error btn-outline" @click="cancel">取消任务</button>
+      <button v-if="!finished" class="btn btn-sm btn-error btn-outline" :disabled="cancelling" @click="cancel">
+        {{ cancelling ? "正在取消…" : "取消任务" }}
+      </button>
       <button
-        v-if="finished && summary?.status === 'completed'"
+        v-if="finished && summary?.result_count"
         class="btn btn-sm btn-primary"
         @click="router.push(`/result/${jobId}`)"
       >
@@ -197,6 +234,9 @@ onBeforeUnmount(() => {
             {{ donePairs }}/{{ summary?.pairs.length ?? "?" }} 对完成 · {{ inFlightPairs }} 对进行中 ·
             bundle {{ pairProgress.done }}/{{ pairProgress.total || "?" }}
           </p>
+          <p v-if="!finished && !sseConnected" class="text-xs text-warning">
+            实时连接已断开，正在降级为轮询刷新…
+          </p>
         </div>
       </div>
 
@@ -215,7 +255,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="rounded-xl bg-base-200 p-3">
               <div class="text-xs text-base-content/60">前缀缓存命中</div>
-              <div class="text-xl font-bold text-primary">{{ cacheShare }}%</div>
+              <div class="text-xl font-bold text-primary">
+                {{ cacheShare }}%
+                <span class="text-sm font-normal text-base-content/50">{{ usage.cached.toLocaleString() }}</span>
+              </div>
             </div>
             <div class="rounded-xl bg-base-200 p-3">
               <div class="text-xs text-base-content/60">LLM 调用</div>
@@ -244,7 +287,7 @@ onBeforeUnmount(() => {
     <div class="card bg-base-100 shadow-sm">
       <div class="card-body p-5">
         <h2 class="text-sm font-semibold">实时事件</h2>
-        <div class="max-h-60 overflow-y-auto rounded-xl bg-base-200 p-3 font-mono text-xs leading-5">
+        <div ref="eventBox" class="max-h-60 overflow-y-auto rounded-xl bg-base-200 p-3 font-mono text-xs leading-5">
           <p v-for="event in events" :key="event.seq" class="text-base-content/70">
             <span class="text-base-content/40">{{ new Date(event.ts * 1000).toLocaleTimeString() }}</span>
             <template v-if="event.type === 'progress'"> · {{ event.input?.split("/").pop() }} → {{ event.lang }}（{{ event.done }}/{{ event.total }}）</template>

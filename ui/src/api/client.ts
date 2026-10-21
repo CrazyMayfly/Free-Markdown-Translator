@@ -32,13 +32,20 @@ function friendlyStatusError(status: number, detail: string): string {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
-    response = await fetch(`${apiBase}${path}`, init);
-  } catch {
+    response = await fetch(`${apiBase}${path}`, { ...init, signal: controller.signal });
+  } catch (error) {
+    const aborted = error instanceof DOMException && error.name === "AbortError";
     throw new ApiError(
       "network",
-      "无法连接 mdtx 后端服务。请确认 API 已启动（浏览器模式下：mdtx --ui-port 8000）。",
+      aborted
+        ? "请求超时，后端服务可能已停止响应。"
+        : "无法连接 mdtx 后端服务。请确认 API 已启动（浏览器模式下：mdtx --ui-port 8000）。",
     );
+  } finally {
+    window.clearTimeout(timeout);
   }
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
@@ -91,8 +98,11 @@ export interface AppConfig {
     final_edit_max_segments: number;
     reviewer_model: string;
     judge_model: string;
+    fast_model: string;
+    quality_model: string;
+    brief_model: string;
   };
-  segmentation: { max_bundle_chars: number; max_bundle_segments: number; section_align_min_chars: number };
+  segmentation: { max_bundle_tokens: number; min_bundle_tokens: number };
   input: { file_pattern: string };
   style: {
     tone: string;
@@ -110,6 +120,7 @@ export interface AppConfig {
     reuse_min_confidence: number;
     glossary_persist: boolean;
     glossary_path: string;
+    brief_path: string;
   };
 }
 
@@ -150,6 +161,7 @@ export interface SegmentPair {
   source: string;
   translated: string;
   confidence: number;
+  notes?: string[];
 }
 
 export interface JobResult {

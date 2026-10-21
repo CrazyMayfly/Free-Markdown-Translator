@@ -15,14 +15,34 @@ const mode = ref("balanced");
 const evaluate = ref(false);
 const resume = ref(false);
 const outputDir = ref("");
+const outputDirTouched = ref(false); // 用户手动改过输出目录后，不再随选择自动联动
 const submitting = ref(false);
 const errorMessage = ref("");
 const reusedNotice = ref(false);
 
+// 语言代码 ↔ 预设名互查：配置里存的是代码（zh-CN），按钮显示英文名（Chinese），
+// 两者都映射到同一 code，避免“配置默认语言显示成普通 chip”的错位。
+const LANG_CODES: Record<string, string> = {
+  chinese: "zh-CN",
+  english: "en",
+  japanese: "ja",
+  korean: "ko",
+  german: "de",
+  french: "fr",
+  spanish: "es",
+  russian: "ru",
+};
+const langCodeOf = (name: string) => LANG_CODES[name.toLowerCase()] ?? name;
+const langNameOf = (code: string) => {
+  const hit = Object.entries(LANG_CODES).find(([, c]) => c.toLowerCase() === code.toLowerCase());
+  return hit ? hit[0][0].toUpperCase() + hit[0].slice(1) : code;
+};
+const selectedLangsCoded = computed(() => selectedLangs.value.map(langCodeOf));
+
 const MODES = [
-  { value: "fast", title: "快速", desc: "跳过反思审校，速度最快", icon: "⚡" },
-  { value: "balanced", title: "平衡", desc: "按置信度自动触发反思审校", icon: "⚖️" },
-  { value: "strict", title: "严格", desc: "全量反思审校 + 格式修复", icon: "🎯" },
+  { value: "fast", title: "快速", desc: "仅术语与语气 + 最小上下文，省 token 提速", icon: "⚡" },
+  { value: "balanced", title: "平衡", desc: "文档摘要 + 只审可疑段落", icon: "⚖️" },
+  { value: "quality", title: "质量", desc: "完整上下文 + 全量审校 + 文档级终审", icon: "🎯" },
 ];
 
 function toggleLang(lang: string) {
@@ -48,10 +68,30 @@ function addPaths(paths: { path: string; is_dir: boolean }[]) {
       selected.value.push(item);
     }
   }
+  syncDefaultOutputDir();
 }
 
 function removePath(path: string) {
   selected.value = selected.value.filter((item) => item.path !== path);
+  syncDefaultOutputDir();
+}
+
+function clearAll() {
+  if (!selected.value.length) return;
+  if (window.confirm("确定要移除全部已添加的文件/目录吗？")) {
+    selected.value = [];
+    syncDefaultOutputDir();
+  }
+}
+
+// 输出目录默认规则：取第一个所选文件/目录的父目录下的 output/ 文件夹；
+// 一旦用户手动改过输出目录，就不再自动联动。
+function syncDefaultOutputDir() {
+  if (outputDirTouched.value || !selected.value.length) return;
+  const first = selected.value[0].path;
+  const base = first.endsWith("/") ? first.slice(0, -1) : first;
+  const parent = base.slice(0, base.lastIndexOf("/")) || base;
+  outputDir.value = `${parent}/output`;
 }
 
 const summaryText = computed(() => {
@@ -65,14 +105,21 @@ const dragging = ref(false);
 let unlistenDrop: (() => void) | null = null;
 
 function isMarkdownish(path: string) {
-  return /\.(md|markdown)$/i.test(path) || !path.split("/").pop()!.includes(".");
+  return /\.(md|markdown)$/i.test(path);
 }
 
 async function setupNativeDrop() {
   if (!isTauri()) return;
   unlistenDrop = await onNativeFileDrop((paths) => {
     dragging.value = false;
-    addPaths(paths.filter(isMarkdownish).map((p) => ({ path: p, is_dir: !p.includes(".") || /\.(md|markdown)$/i.test(p) === false && !p.split("/").pop()!.includes(".") })));
+    // Only real markdown files are accepted on drop; directories with a dot
+    // in their name (docs.v2/) are no longer silently dropped — the native
+    // handler already filters, and here we just normalise what got through.
+    addPaths(
+      paths
+        .filter(isMarkdownish)
+        .map((p) => ({ path: p, is_dir: false })),
+    );
   });
 }
 
@@ -122,6 +169,38 @@ function addCurrentDir() {
   browserOpen.value = false;
 }
 
+// ── 输出目录选择弹窗（复用 listDir 浏览能力）──────────────
+const dirPickerOpen = ref(false);
+const pickerDir = ref("");
+const pickerParent = ref<string | null>(null);
+const pickerEntries = ref<FsEntry[]>([]);
+const pickerLoading = ref(false);
+
+async function pickerBrowse(path: string) {
+  pickerLoading.value = true;
+  try {
+    const data = await api.listDir(path);
+    pickerDir.value = data.path;
+    pickerParent.value = data.parent;
+    pickerEntries.value = data.entries.filter((e) => e.is_dir);
+  } catch (error) {
+    errorMessage.value = error instanceof ApiError ? error.message : String(error);
+  } finally {
+    pickerLoading.value = false;
+  }
+}
+
+function openDirPicker() {
+  dirPickerOpen.value = true;
+  if (!pickerDir.value) void pickerBrowse(outputDir.value || "~");
+}
+
+function pickOutputDir(path: string) {
+  outputDir.value = path;
+  outputDirTouched.value = true;
+  dirPickerOpen.value = false;
+}
+
 function pickAndClose() {
   browserOpen.value = false;
 }
@@ -141,7 +220,7 @@ async function submit() {
   try {
     const job = await api.createJob({
       paths: selected.value.map((item) => item.path),
-      target_langs: [...selectedLangs.value],
+      target_langs: selectedLangsCoded.value,
       mode: mode.value,
       evaluate: evaluate.value,
       resume: resume.value,
@@ -179,12 +258,15 @@ function applyReuse() {
       }));
     }
     if (reuse.target_langs?.length) {
-      selectedLangs.value = reuse.target_langs
-        .map((lang) => LANG_PRESETS.find((p) => p.toLowerCase() === lang.toLowerCase()) ?? lang)
-        .slice(0, 6);
+      selectedLangs.value = reuse.target_langs.map(langNameOf).slice(0, 6);
     }
-    if (reuse.mode && MODES.some((m) => m.value === reuse.mode)) mode.value = reuse.mode;
-    if (reuse.output_dir) outputDir.value = reuse.output_dir;
+    // Old jobs recorded the deprecated "strict" alias; map it before matching.
+    const reuseMode = reuse.mode === "strict" ? "quality" : reuse.mode;
+    if (reuseMode && MODES.some((m) => m.value === reuseMode)) mode.value = reuseMode;
+    if (reuse.output_dir) {
+      outputDir.value = reuse.output_dir;
+      outputDirTouched.value = true;
+    }
     evaluate.value = Boolean(reuse.evaluate);
     reusedNotice.value = true;
   } catch {
@@ -196,13 +278,12 @@ onMounted(async () => {
   try {
     const data = await api.getConfig();
     outputDir.value = data.config.output.directory;
+    outputDirTouched.value = true; // 初始值来自配置，不随选择联动
     const defaults = data.config.target_languages.filter(Boolean);
     if (defaults.length) {
-      // Match config values to preset casing (english -> English); keep
-      // unknown languages as custom chips.
-      selectedLangs.value = defaults
-        .map((lang) => LANG_PRESETS.find((p) => p.toLowerCase() === lang.toLowerCase()) ?? lang)
-        .slice(0, 4);
+      // Match config codes to preset names (zh-CN -> Chinese); keep unknown
+      // languages as custom chips.
+      selectedLangs.value = defaults.map(langNameOf).slice(0, 4);
     }
   } catch {
     /* 连接状态由全局横幅呈现 */
@@ -251,7 +332,7 @@ onUnmounted(() => unlistenDrop?.());
       <div class="card-body gap-2 p-4">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold">已添加（{{ selected.length }}）</h2>
-          <button class="btn btn-ghost btn-xs text-error" @click="selected = []">全部移除</button>
+          <button class="btn btn-ghost btn-xs text-error" @click="clearAll">全部移除</button>
         </div>
         <ul class="flex flex-col gap-1">
           <li
@@ -277,6 +358,7 @@ onUnmounted(() => unlistenDrop?.());
             :key="lang"
             class="btn btn-sm rounded-full"
             :class="selectedLangs.includes(lang) ? 'btn-primary' : 'btn-outline'"
+            :aria-pressed="selectedLangs.includes(lang)"
             @click="toggleLang(lang)"
           >
             {{ lang }}
@@ -331,8 +413,23 @@ onUnmounted(() => unlistenDrop?.());
       <div class="collapse-content flex flex-col gap-3">
         <label class="form-control">
           <span class="label-text pb-1">输出目录</span>
-          <input v-model="outputDir" class="input input-bordered input-sm font-mono" placeholder="output" />
-          <span class="label-text mt-1 text-xs text-base-content/50">相对路径将解析到用户主目录（如 ~/output）</span>
+          <div class="join w-full">
+            <input
+              v-model="outputDir"
+              class="input input-bordered input-sm join-item grow font-mono"
+              placeholder="output"
+              @input="outputDirTouched = true"
+            />
+            <button
+              type="button"
+              class="btn btn-sm join-item"
+              :disabled="browserLoading"
+              @click="openDirPicker"
+            >
+              浏览…
+            </button>
+          </div>
+          <span class="label-text mt-1 text-xs text-base-content/50">默认随所选文档生成同目录下的 output/ 文件夹；手动修改后不再联动</span>
         </label>
         <label class="label cursor-pointer justify-start gap-3">
           <input v-model="evaluate" type="checkbox" class="toggle toggle-sm" />
@@ -352,7 +449,7 @@ onUnmounted(() => unlistenDrop?.());
     </div>
 
     <!-- 粘性动作栏 -->
-    <div class="fixed bottom-0 left-56 right-0 z-10 border-t border-base-300 bg-base-100/90 backdrop-blur">
+    <div class="fixed bottom-0 left-0 right-0 z-10 border-t border-base-300 bg-base-100/90 backdrop-blur lg:left-56">
       <div class="mx-auto flex w-full max-w-6xl items-center gap-4 px-6 py-3">
         <div class="min-w-0 flex-1 text-sm">
           <p class="truncate font-medium" :class="selected.length ? '' : 'text-base-content/40'">
@@ -407,6 +504,39 @@ onUnmounted(() => unlistenDrop?.());
         </div>
       </div>
       <div class="modal-backdrop" @click="browserOpen = false"></div>
+    </dialog>
+
+    <!-- 输出目录选择弹窗 -->
+    <dialog class="modal" :class="{ 'modal-open': dirPickerOpen }">
+      <div class="modal-box max-w-2xl">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold">选择输出目录</h3>
+          <button class="btn btn-circle btn-ghost btn-sm" aria-label="关闭" @click="dirPickerOpen = false">✕</button>
+        </div>
+        <div class="mt-3 flex items-center gap-2">
+          <input class="input input-sm input-bordered grow font-mono text-xs" :value="pickerDir" readonly />
+          <button class="btn btn-sm" :disabled="!pickerParent || pickerLoading" @click="pickerParent && pickerBrowse(pickerParent)">
+            上一级
+          </button>
+        </div>
+        <div v-if="pickerLoading" class="mt-4 flex justify-center py-8">
+          <span class="loading loading-spinner"></span>
+        </div>
+        <ul v-else class="menu mt-3 max-h-96 w-full overflow-y-auto rounded-xl border border-base-300 p-1">
+          <li v-for="entry in pickerEntries" :key="entry.path">
+            <button @click="pickerDir === entry.path ? pickOutputDir(entry.path) : pickerBrowse(entry.path)">
+              <span>📁</span>
+              <span class="flex-1 truncate text-left">{{ entry.name }}</span>
+              <span v-if="pickerDir === entry.path" class="badge badge-xs badge-primary">选中</span>
+            </button>
+          </li>
+          <li v-if="!pickerEntries.length" class="p-3 text-center text-xs text-base-content/50">此目录下没有子文件夹</li>
+        </ul>
+        <div class="modal-action">
+          <button class="btn btn-primary btn-sm" @click="pickOutputDir(pickerDir)">选择当前目录</button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="dirPickerOpen = false"></div>
     </dialog>
   </div>
 </template>

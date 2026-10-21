@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 import { api, type AppConfig, type GlossaryEntry } from "../api/client";
-
-const API_KEY_MASK = "********";
 
 const config = ref<AppConfig | null>(null);
 const configPath = ref("");
 const apiKeyInput = ref("");
+const hasStoredKey = ref(false);
+const showKey = ref(false);
 const saving = ref(false);
 const message = ref("");
 const messageKind = ref<"success" | "error">("success");
@@ -14,23 +15,47 @@ const memoryStats = ref<{ hits: number; misses: number; entries: number } | null
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; text: string } | null>(null);
 
+const savedSnapshot = ref("");
+const dirty = computed(() => {
+  if (!config.value) return false;
+  return JSON.stringify(config.value) !== savedSnapshot.value || apiKeyInput.value !== "";
+});
+
 const termsText = ref("");
 const instructionsText = ref("");
 
 const glossaryLang = ref("zh-CN");
 const glossaryEntries = ref<GlossaryEntry[]>([]);
+const glossaryQuery = ref("");
 const newTerm = ref("");
 const newRendering = ref("");
 const glossaryBusy = ref(false);
 
+const filteredGlossary = computed(() => {
+  const q = glossaryQuery.value.trim().toLowerCase();
+  if (!q) return glossaryEntries.value;
+  return glossaryEntries.value.filter(
+    (e) => e.term.toLowerCase().includes(q) || e.rendering.toLowerCase().includes(q),
+  );
+});
+
 async function load() {
   try {
     const data = await api.getConfig();
+    // "strict" is a deprecated backend alias for "quality"; normalise it so the
+    // mode buttons highlight the right option and a re-save writes the new name.
+    if (data.config.pipeline.mode === "strict") data.config.pipeline.mode = "quality";
     config.value = data.config;
     configPath.value = data.config_path;
-    apiKeyInput.value = data.config.provider.api_key || "";
+    // The backend returns a masked key (********) when one is stored; do NOT
+    // prefill the input with it — the user would then edit the literal mask
+    // into their key and overwrite the real one. Leave it blank instead.
+    apiKeyInput.value = "";
+    hasStoredKey.value = Boolean(data.config.provider.api_key);
     termsText.value = data.config.style.preserve_terms.join(", ");
     instructionsText.value = data.config.style.instructions.join("\n");
+    // Snapshot for dirty tracking (after the strict->quality normalisation).
+    savedSnapshot.value = JSON.stringify(config.value);
   } catch (error) {
     show(String(error), "error");
   }
@@ -98,7 +123,9 @@ async function save() {
       target_languages: config.value.target_languages,
       provider: {
         ...config.value.provider,
-        api_key: apiKeyInput.value || API_KEY_MASK,
+        // Only send a key when the user actually typed one; otherwise omit it
+        // so the backend keeps the stored key untouched.
+        ...(apiKeyInput.value ? { api_key: apiKeyInput.value } : {}),
       },
       pipeline: config.value.pipeline,
       segmentation: config.value.segmentation,
@@ -120,12 +147,23 @@ async function save() {
     };
     const data = await api.patchConfig(patch as Partial<AppConfig>);
     config.value = data.config;
-    apiKeyInput.value = data.config.provider.api_key || "";
+    apiKeyInput.value = "";
+    hasStoredKey.value = Boolean(data.config.provider.api_key);
+    savedSnapshot.value = JSON.stringify(data.config);
     show(`已保存到 ${data.config_path}`, "success");
   } catch (error) {
     show(String(error), "error");
   } finally {
     saving.value = false;
+  }
+}
+
+function clampBundleTokens() {
+  if (!config.value) return;
+  const seg = config.value.segmentation;
+  if (seg.min_bundle_tokens > seg.max_bundle_tokens) {
+    seg.min_bundle_tokens = seg.max_bundle_tokens;
+    show("最小包 token 不能超过上限，已自动调整", "error");
   }
 }
 
@@ -157,12 +195,37 @@ async function testConnection() {
 }
 
 async function clearMemory() {
+  if (!window.confirm("确定要清空全部翻译记忆吗？此操作不可恢复。")) return;
   const removed = await api.clearMemory();
   show(`已清除 ${removed.removed} 条翻译记忆`, "success");
   memoryStats.value = await api.memoryStats();
 }
 
-onMounted(load);
+onBeforeRouteLeave(() => {
+  if (dirty.value && !window.confirm("有未保存的更改，确定离开吗？")) return false;
+  return true;
+});
+
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (dirty.value) event.preventDefault();
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    void save();
+  }
+}
+
+onMounted(() => {
+  load();
+  window.addEventListener("beforeunload", beforeUnload);
+  window.addEventListener("keydown", onKeydown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", beforeUnload);
+  window.removeEventListener("keydown", onKeydown);
+});
 </script>
 
 <template>
@@ -171,9 +234,9 @@ onMounted(load);
       <h1 class="text-lg font-bold">配置</h1>
       <span class="font-mono text-xs text-base-content/50">{{ configPath }}</span>
       <div class="grow"></div>
-      <button class="btn btn-primary btn-sm" :disabled="saving || !config" @click="save">
+      <button class="btn btn-primary btn-sm" :class="{ 'ring-2 ring-primary/30': dirty }" :disabled="saving || !config" @click="save">
         <span v-if="saving" class="loading loading-spinner loading-xs"></span>
-        保存
+        {{ dirty ? "保存 *" : "保存" }}
       </button>
     </div>
 
@@ -198,12 +261,22 @@ onMounted(load);
               </label>
               <label class="form-control">
                 <span class="label-text pb-1">API Key</span>
-                <input
-                  v-model="apiKeyInput"
-                  type="password"
-                  class="input input-bordered input-sm font-mono"
-                  :placeholder="API_KEY_MASK"
-                />
+                <div class="join">
+                  <input
+                    v-model="apiKeyInput"
+                    :type="showKey ? 'text' : 'password'"
+                    class="input input-bordered input-sm join-item w-full font-mono"
+                    :placeholder="hasStoredKey ? '已保存，留空保持不变' : 'sk-...'"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm join-item"
+                    :class="showKey ? 'btn-active' : ''"
+                    @click="showKey = !showKey"
+                  >
+                    {{ showKey ? "隐藏" : "显示" }}
+                  </button>
+                </div>
               </label>
             </div>
             <div class="flex items-center gap-3">
@@ -224,15 +297,17 @@ onMounted(load);
             <h2 class="card-title text-base">翻译设置</h2>
             <label class="form-control">
               <span class="label-text pb-1">质量与速度</span>
-              <div class="join w-full">
+              <div class="grid grid-cols-3 gap-2">
                 <button
-                  v-for="option in [['fast', '快速'], ['balanced', '均衡'], ['strict', '严格']]"
+                  v-for="option in [['fast', '快速', '⚡'], ['balanced', '平衡', '⚖️'], ['quality', '质量', '🎯']]"
                   :key="option[0]"
-                  class="btn btn-sm join-item grow"
+                  type="button"
+                  class="btn btn-sm"
                   :class="config.pipeline.mode === option[0] ? 'btn-primary' : 'btn-ghost'"
+                  :aria-pressed="config.pipeline.mode === option[0]"
                   @click="config.pipeline.mode = option[0]"
                 >
-                  {{ option[1] }}
+                  <span class="mr-1">{{ option[2] }}</span>{{ option[1] }}
                 </button>
               </div>
             </label>
@@ -290,6 +365,13 @@ onMounted(load);
                 清空记忆
               </button>
             </div>
+            <label class="form-control">
+              <span class="label-text pb-1">
+                文档摘要缓存路径
+                <span class="ml-1 text-xs text-base-content/50">全文摘要（Brief）的本地缓存，命中时不调用模型</span>
+              </span>
+              <input v-model="config.memory.brief_path" class="input input-bordered input-sm font-mono" placeholder=".mdtx/briefs.sqlite3" />
+            </label>
             <h3 class="pt-1 text-sm font-semibold">术语表</h3>
             <p class="text-xs text-base-content/60">为术语指定统一译法，全文保持一致；手动条目优先于自动生成。</p>
             <div class="flex flex-wrap items-end gap-2">
@@ -309,33 +391,43 @@ onMounted(load);
                 添加
               </button>
             </div>
-            <div v-if="glossaryEntries.length" class="overflow-x-auto">
-              <table class="table table-sm">
-                <thead>
-                  <tr>
-                    <th>词</th>
-                    <th>译法</th>
-                    <th>来源</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="entry in glossaryEntries" :key="entry.term">
-                    <td class="font-mono">{{ entry.term }}</td>
-                    <td>{{ entry.rendering }}</td>
-                    <td>
-                      <span class="badge badge-sm" :class="entry.origin === 'user' ? 'badge-primary' : 'badge-ghost'">
-                        {{ entry.origin === "user" ? "手动" : "自动" }}
-                      </span>
-                    </td>
-                    <td class="text-right">
-                      <button class="btn btn-ghost btn-xs text-error" :disabled="glossaryBusy" @click="deleteGlossaryEntry(entry.term)">
-                        删除
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-if="glossaryEntries.length" class="flex flex-col gap-2">
+              <input
+                v-model="glossaryQuery"
+                class="input input-bordered input-sm"
+                placeholder="搜索术语或译法…"
+              />
+              <div class="overflow-x-auto">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>词</th>
+                      <th>译法</th>
+                      <th>来源</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="entry in filteredGlossary" :key="entry.term">
+                      <td class="font-mono">{{ entry.term }}</td>
+                      <td>{{ entry.rendering }}</td>
+                      <td>
+                        <span class="badge badge-sm" :class="entry.origin === 'user' ? 'badge-primary' : 'badge-ghost'">
+                          {{ entry.origin === "user" ? "手动" : "自动" }}
+                        </span>
+                      </td>
+                      <td class="text-right">
+                        <button class="btn btn-ghost btn-xs text-error" :disabled="glossaryBusy" @click="deleteGlossaryEntry(entry.term)">
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                    <tr v-if="!filteredGlossary.length">
+                      <td colspan="4" class="text-center text-base-content/50">没有匹配「{{ glossaryQuery }}」的术语</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
             <p v-else class="text-sm text-base-content/50">还没有固定译名，直接在上方添加即可。</p>
           </div>
@@ -353,7 +445,7 @@ onMounted(load);
               <div class="grid gap-2 md:grid-cols-2">
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_glossary" type="checkbox" class="toggle toggle-sm" />
-                  <span class="label-text">统一术语译法<span class="ml-1 text-xs text-base-content/50">全文保持一致</span></span>
+                  <span class="label-text">统一术语译法<span class="ml-1 text-xs text-base-content/50">全文保持一致（快速模式不生效）</span></span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_sentinels" type="checkbox" class="toggle toggle-sm" />
@@ -361,15 +453,15 @@ onMounted(load);
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_anchor_scheduling" type="checkbox" class="toggle toggle-sm" />
-                  <span class="label-text">上下文衔接<span class="ml-1 text-xs text-base-content/50">参考已译内容保持连贯</span></span>
+                  <span class="label-text">上下文衔接<span class="ml-1 text-xs text-base-content/50">参考已译内容保持连贯（快速模式不生效）</span></span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_context_pull" type="checkbox" class="toggle toggle-sm" />
-                  <span class="label-text">自动补充上下文<span class="ml-1 text-xs text-base-content/50">检索相似的历史译文</span></span>
+                  <span class="label-text">自动补充上下文<span class="ml-1 text-xs text-base-content/50">检索相似的历史译文（快速模式不生效）</span></span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_final_edit" type="checkbox" class="toggle toggle-sm" />
-                  <span class="label-text">全文最终校对<span class="ml-1 text-xs text-base-content/50">仅严格模式生效</span></span>
+                  <span class="label-text">全文最终校对<span class="ml-1 text-xs text-base-content/50">仅质量模式生效</span></span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.memory.fuzzy_examples" type="checkbox" class="toggle toggle-sm" />
@@ -381,7 +473,7 @@ onMounted(load);
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_review" type="checkbox" class="toggle toggle-sm" />
-                  <span class="label-text">强制审校<span class="ml-1 text-xs text-base-content/50">对所有文本包执行审校</span></span>
+                  <span class="label-text">强制审校<span class="ml-1 text-xs text-base-content/50">对所有文本包执行审校（平衡/质量模式）</span></span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-3">
                   <input v-model="config.pipeline.enable_format_guard" type="checkbox" class="toggle toggle-sm" />
@@ -405,6 +497,18 @@ onMounted(load);
                 <label class="form-control">
                   <span class="label-text pb-1">评分模型（留空与翻译一致）</span>
                   <input v-model="config.pipeline.judge_model" class="input input-bordered input-sm font-mono" placeholder="gpt-5" />
+                </label>
+                <label class="form-control">
+                  <span class="label-text pb-1">快速模式模型（留空与翻译一致）</span>
+                  <input v-model="config.pipeline.fast_model" class="input input-bordered input-sm font-mono" placeholder="留空 = 使用翻译模型" />
+                </label>
+                <label class="form-control">
+                  <span class="label-text pb-1">质量模式模型（留空与翻译一致）</span>
+                  <input v-model="config.pipeline.quality_model" class="input input-bordered input-sm font-mono" placeholder="留空 = 使用翻译模型" />
+                </label>
+                <label class="form-control">
+                  <span class="label-text pb-1">文档摘要模型（留空与翻译一致）</span>
+                  <input v-model="config.pipeline.brief_model" class="input input-bordered input-sm font-mono" placeholder="留空 = 使用翻译模型" />
                 </label>
                 <label class="form-control">
                   <span class="label-text pb-1">密钥环境变量名</span>
@@ -444,16 +548,24 @@ onMounted(load);
                   <input v-model.number="config.execution.max_parallel_translations" type="number" min="1" max="32" class="input input-bordered input-sm" />
                 </label>
                 <label class="form-control">
-                  <span class="label-text pb-1">包字符上限</span>
-                  <input v-model.number="config.segmentation.max_bundle_chars" type="number" class="input input-bordered input-sm" />
+                  <span class="label-text pb-1">包 token 上限<span class="ml-1 text-xs text-base-content/50">默认 4000</span></span>
+                  <input
+                    v-model.number="config.segmentation.max_bundle_tokens"
+                    type="number"
+                    min="200"
+                    class="input input-bordered input-sm"
+                    @change="clampBundleTokens"
+                  />
                 </label>
                 <label class="form-control">
-                  <span class="label-text pb-1">包段落上限</span>
-                  <input v-model.number="config.segmentation.max_bundle_segments" type="number" class="input input-bordered input-sm" />
-                </label>
-                <label class="form-control">
-                  <span class="label-text pb-1">章节对齐字符数</span>
-                  <input v-model.number="config.segmentation.section_align_min_chars" type="number" min="0" class="input input-bordered input-sm" />
+                  <span class="label-text pb-1">最小包 token<span class="ml-1 text-xs text-base-content/50">默认 1000</span></span>
+                  <input
+                    v-model.number="config.segmentation.min_bundle_tokens"
+                    type="number"
+                    min="0"
+                    class="input input-bordered input-sm"
+                    @change="clampBundleTokens"
+                  />
                 </label>
                 <label class="form-control">
                   <span class="label-text pb-1">审校轮数</span>

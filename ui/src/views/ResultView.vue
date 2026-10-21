@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import MarkdownIt from "markdown-it";
 import { api, ApiError, type JobDetail, type JobResult, type SegmentPair } from "../api/client";
 
 const md = new MarkdownIt({ html: false, linkify: true });
+// Links in the rendered translation must not navigate the whole app away (in
+// the Tauri webview that replaces the app with the external site).
+const defaultLinkOpen =
+  md.renderer.rules.link_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  tokens[idx].attrSet("target", "_blank");
+  tokens[idx].attrSet("rel", "noopener noreferrer");
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
 const route = useRoute();
 const router = useRouter();
 const jobId = String(route.params.id ?? "");
@@ -29,12 +39,23 @@ function fileName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
+const revealLabel =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform ?? "")
+    ? "在访达中显示"
+    : "在资源管理器中显示";
+
 function scoreBadge(score: number | undefined) {
   if (score === undefined) return "badge-ghost";
   if (score >= 4.5) return "badge-success";
   if (score >= 3.5) return "badge-info";
   if (score >= 2.5) return "badge-warning";
   return "badge-error";
+}
+
+function confidenceClass(conf: number) {
+  if (conf >= 0.85) return "text-success";
+  if (conf >= 0.6) return "text-warning";
+  return "text-error";
 }
 
 function scoreBarColor(score: number) {
@@ -87,6 +108,14 @@ async function saveToFile() {
 function startEdit(segment: SegmentPair) {
   editingId.value = segment.segment_id;
   editText.value = segment.translated;
+  // Auto-grow the textarea after it renders.
+  void nextTick(() => {
+    const el = document.querySelector<HTMLTextAreaElement>("textarea[data-editing]");
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  });
 }
 
 function cancelEdit() {
@@ -140,14 +169,14 @@ onMounted(async () => {
 
     <template v-else>
       <!-- 结果切换 -->
-      <div v-if="detail.results.length > 1" role="tablist" class="tabs tabs-box w-fit">
+      <div v-if="detail.results.length > 1" role="tablist" class="tabs tabs-box w-fit max-w-full overflow-x-auto">
         <button
           v-for="(item, index) in detail.results"
           :key="`${item.input_path}-${item.target_lang}`"
           role="tab"
           class="tab"
           :class="{ 'tab-active': index === activeIndex }"
-          @click="activeIndex = index"
+          @click="activeIndex = index; editingId = ''; editText = ''"
         >
           {{ fileName(item.input_path) }} → {{ item.target_lang }}
         </button>
@@ -171,7 +200,7 @@ onMounted(async () => {
             {{ savingFile ? "保存中…" : result.output_path ? "重新保存到文件" : "保存到文件" }}
           </button>
           <button class="btn btn-ghost btn-sm" @click="revealOutput">
-            在访达中显示
+            {{ revealLabel }}
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H8m9 0v9"/></svg>
           </button>
         </div>
@@ -185,8 +214,9 @@ onMounted(async () => {
                 {{ result.validation.passed ? "通过" : "失败" }}
               </span>
             </div>
-            <p v-if="result.validation.errors.length" class="mt-1 line-clamp-2 text-xs text-error">
+            <p v-if="result.validation.errors.length" class="mt-1 text-xs text-error">
               {{ result.validation.errors[0] }}
+              <template v-if="result.validation.errors.length > 1"> 等 {{ result.validation.errors.length }} 项</template>
             </p>
           </div>
           <div class="rounded-xl bg-base-100 p-4 shadow-sm">
@@ -214,6 +244,16 @@ onMounted(async () => {
             </p>
           </div>
         </div>
+
+        <!-- 格式校验错误详情（可展开） -->
+        <details v-if="result.validation.errors.length > 1" class="collapse collapse-arrow bg-base-100 shadow-sm">
+          <summary class="collapse-title text-sm font-semibold">
+            格式校验发现 {{ result.validation.errors.length }} 个问题
+          </summary>
+          <div class="collapse-content flex flex-col gap-1">
+            <p v-for="(err, i) in result.validation.errors" :key="i" class="text-xs text-error">· {{ err }}</p>
+          </div>
+        </details>
 
         <!-- 评估分维度条 -->
         <div v-if="result.judge?.scores && !result.judge.error" class="card bg-base-100 shadow-sm">
@@ -252,6 +292,7 @@ onMounted(async () => {
         <article
           v-if="viewMode === 'render'"
           class="card bg-base-100 shadow-sm prose prose-sm max-w-none p-6"
+          :lang="result.target_lang"
           v-html="rendered"
         ></article>
 
@@ -273,12 +314,21 @@ onMounted(async () => {
                 <textarea
                   v-if="editingId === segment.segment_id"
                   v-model="editText"
+                  data-editing
                   class="textarea textarea-bordered w-full font-mono text-xs leading-5"
                   rows="3"
+                  @keydown.meta.enter.prevent="saveEdit(segment)"
+                  @keydown.ctrl.enter.prevent="saveEdit(segment)"
                 ></textarea>
                 <div v-else class="whitespace-pre-wrap">{{ segment.translated }}</div>
                 <div class="mt-1 flex items-center gap-2">
-                  <span class="text-xs text-base-content/40">{{ segment.segment_id }} · 置信度 {{ segment.confidence.toFixed(2) }}</span>
+                  <span class="text-xs text-base-content/40">{{ segment.segment_id }}</span>
+                  <span class="text-xs" :class="confidenceClass(segment.confidence)" :title="`置信度低于 0.85 会触发审校`">
+                    置信度 {{ segment.confidence.toFixed(2) }}
+                  </span>
+                  <span v-if="segment.notes?.length" class="badge badge-ghost badge-xs" :title="segment.notes.join('；')">
+                    {{ segment.notes[0] }}
+                  </span>
                   <template v-if="editingId === segment.segment_id">
                     <button class="btn btn-primary btn-xs ml-auto" :disabled="savingEdit" @click="saveEdit(segment)">
                       {{ savingEdit ? "保存中…" : "保存" }}
