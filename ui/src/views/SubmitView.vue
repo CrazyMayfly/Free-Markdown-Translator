@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, ApiError, type FsEntry } from "../api/client";
+import { confirmAction } from "../confirm";
 import { isTauri, onNativeFileDrop } from "../tauri";
 
 const router = useRouter();
@@ -12,13 +13,15 @@ const LANG_PRESETS = ["Chinese", "English", "Japanese", "Korean", "German", "Fre
 const selectedLangs = ref<string[]>(["Chinese"]);
 const customLang = ref("");
 const mode = ref("balanced");
-const evaluate = ref(false);
-const resume = ref(false);
+const evaluate = computed(() => mode.value === "quality"); // 质量评估跟随模式，不由用户指定
+const resume = ref(true); // 断点续传默认开启
 const outputDir = ref("");
 const outputDirTouched = ref(false); // 用户手动改过输出目录后，不再随选择自动联动
 const submitting = ref(false);
 const errorMessage = ref("");
 const reusedNotice = ref(false);
+// 文风固定为「保持原文」：后端把它映射成提示词措辞（document_context.TONE_PROMPTS）。
+const TONE = "preserve";
 
 // 语言代码 ↔ 预设名互查：配置里存的是代码（zh-CN），按钮显示英文名（Chinese），
 // 两者都映射到同一 code，避免“配置默认语言显示成普通 chip”的错位。
@@ -76,12 +79,12 @@ function removePath(path: string) {
   syncDefaultOutputDir();
 }
 
-function clearAll() {
+async function clearAll() {
   if (!selected.value.length) return;
-  if (window.confirm("确定要移除全部已添加的文件/目录吗？")) {
-    selected.value = [];
-    syncDefaultOutputDir();
-  }
+  const ok = await confirmAction("确定要移除全部已添加的文件/目录吗？", { confirmLabel: "移除" });
+  if (!ok) return;
+  selected.value = [];
+  syncDefaultOutputDir();
 }
 
 // 输出目录默认规则：取第一个所选文件/目录的父目录下的 output/ 文件夹；
@@ -222,10 +225,13 @@ async function submit() {
       paths: selected.value.map((item) => item.path),
       target_langs: selectedLangsCoded.value,
       mode: mode.value,
+      tone: TONE,
       evaluate: evaluate.value,
       resume: resume.value,
       output_dir: outputDir.value || null,
     });
+    // 记住本次选择的目标语言，下次新建任务时预填。
+    localStorage.setItem("mdtx-last-langs", JSON.stringify(selectedLangsCoded.value));
     void router.push(`/run/${job.id}`);
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : String(error);
@@ -267,7 +273,6 @@ function applyReuse() {
       outputDir.value = reuse.output_dir;
       outputDirTouched.value = true;
     }
-    evaluate.value = Boolean(reuse.evaluate);
     reusedNotice.value = true;
   } catch {
     /* ignore malformed reuse payload */
@@ -275,22 +280,49 @@ function applyReuse() {
 }
 
 onMounted(async () => {
+  // 目标语言优先取「上次提交」的记忆，其次才是配置默认值。
+  let hasRemembered = false;
+  const remembered = localStorage.getItem("mdtx-last-langs");
+  if (remembered) {
+    try {
+      const langs = JSON.parse(remembered) as string[];
+      if (Array.isArray(langs) && langs.length) {
+        selectedLangs.value = langs.map(langNameOf);
+        hasRemembered = true;
+      }
+    } catch {
+      /* fall through to config defaults */
+    }
+  }
   try {
     const data = await api.getConfig();
     outputDir.value = data.config.output.directory;
     outputDirTouched.value = true; // 初始值来自配置，不随选择联动
-    const defaults = data.config.target_languages.filter(Boolean);
-    if (defaults.length) {
-      // Match config codes to preset names (zh-CN -> Chinese); keep unknown
-      // languages as custom chips.
-      selectedLangs.value = defaults.map(langNameOf).slice(0, 4);
+    if (!hasRemembered) {
+      const defaults = data.config.target_languages.filter(Boolean);
+      if (defaults.length) {
+        selectedLangs.value = defaults.map(langNameOf).slice(0, 4);
+      }
     }
   } catch {
     /* 连接状态由全局横幅呈现 */
   }
   applyReuse();
+  await expandOutputDir();
   await setupNativeDrop();
 });
+
+// 相对路径的输出目录按用户主目录展开成绝对路径显示（后端同样按主目录解析）。
+async function expandOutputDir() {
+  if (!outputDir.value || outputDir.value.startsWith("/") || outputDir.value.startsWith("~")) return;
+  try {
+    const data = await api.listDir("~");
+    outputDir.value = `${data.path.replace(/\/$/, "")}/${outputDir.value}`;
+    outputDirTouched.value = true;
+  } catch {
+    /* 无法取得主目录时保持原样 */
+  }
+}
 onUnmounted(() => unlistenDrop?.());
 </script>
 
@@ -394,6 +426,7 @@ onUnmounted(() => unlistenDrop?.());
             :key="item.value"
             class="rounded-xl border-2 p-4 text-left transition-all"
             :class="mode === item.value ? 'border-primary bg-primary/5 shadow-sm' : 'border-base-300 hover:border-base-400'"
+            :aria-pressed="mode === item.value"
             @click="mode = item.value"
           >
             <div class="flex items-center justify-between">
@@ -406,35 +439,27 @@ onUnmounted(() => unlistenDrop?.());
       </div>
     </div>
 
-    <!-- 高级选项 -->
-    <div class="collapse collapse-arrow rounded-2xl bg-base-100 shadow-sm">
-      <input type="checkbox" />
-      <div class="collapse-title text-sm font-semibold">高级选项</div>
-      <div class="collapse-content flex flex-col gap-3">
-        <label class="form-control">
-          <span class="label-text pb-1">输出目录</span>
-          <div class="join w-full">
-            <input
-              v-model="outputDir"
-              class="input input-bordered input-sm join-item grow font-mono"
-              placeholder="output"
-              @input="outputDirTouched = true"
-            />
-            <button
-              type="button"
-              class="btn btn-sm join-item"
-              :disabled="browserLoading"
-              @click="openDirPicker"
-            >
-              浏览…
-            </button>
-          </div>
-          <span class="label-text mt-1 text-xs text-base-content/50">默认随所选文档生成同目录下的 output/ 文件夹；手动修改后不再联动</span>
-        </label>
-        <label class="label cursor-pointer justify-start gap-3">
-          <input v-model="evaluate" type="checkbox" class="toggle toggle-sm" />
-          <span class="label-text text-sm">完成后运行 LLM 质量评估（会额外消耗 token）</span>
-        </label>
+    <!-- 输出目录 -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body gap-3 p-5">
+        <h2 class="text-sm font-semibold">输出目录</h2>
+        <div class="join w-full">
+          <input
+            v-model="outputDir"
+            class="input input-bordered input-sm join-item grow font-mono"
+            placeholder="output"
+            @input="outputDirTouched = true"
+          />
+          <button
+            type="button"
+            class="btn btn-sm join-item"
+            :disabled="pickerLoading"
+            @click="openDirPicker"
+          >
+            浏览…
+          </button>
+        </div>
+        <p class="text-xs text-base-content/50">默认随所选文档生成同目录下的 output/ 文件夹；手动修改后不再联动</p>
         <label class="label cursor-pointer justify-start gap-3">
           <input v-model="resume" type="checkbox" class="toggle toggle-sm" />
           <span class="label-text text-sm">断点续传（复用上次未完成任务的已译内容）</span>

@@ -128,6 +128,8 @@ export interface GlossaryEntry {
   term: string;
   rendering: string;
   origin: string;
+  status: string;
+  doc_count: number;
   updated_at: string;
 }
 
@@ -204,7 +206,7 @@ export interface FsEntry {
 }
 
 export const api = {
-  health: () => request<{ status: string }>("/api/health"),
+  health: () => request<{ status: string; version?: string; features?: string[] }>("/api/health"),
   getConfig: () => request<{ config: AppConfig; config_path: string }>("/api/config"),
   patchConfig: (patch: Partial<AppConfig>) =>
     request<{ config: AppConfig; config_path: string }>("/api/config", {
@@ -264,6 +266,12 @@ export const api = {
   glossaryDelete: (lang: string, term: string) =>
     request<{ deleted: boolean }>(`/api/glossary?lang=${encodeURIComponent(lang)}&term=${encodeURIComponent(term)}`, {
       method: "DELETE",
+    }),
+  glossarySetStatus: (lang: string, term: string, status: string) =>
+    request<{ lang: string; term: string; status: string }>("/api/glossary/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lang, term, status }),
     }),
   listCheckpoints: () =>
     request<{ file: string; fingerprint: string; bundles: number }[]>("/api/checkpoints"),

@@ -16,12 +16,45 @@ const finished = ref(false);
 const notified = ref(false);
 const currentPair = ref("");
 const pairProgress = ref({ done: 0, total: 0 });
-const pairLog = ref<{ key: string; input: string; lang: string; done: number; total: number }[]>([]);
+interface PairStage {
+  phase: string;
+  start: number;
+  end: number | null;
+}
+
+interface PairRow {
+  key: string;
+  input: string;
+  lang: string;
+  done: number;
+  total: number;
+  phase: string;
+  phaseStart: number;
+  /** Wall-clock ms of pair_start (or first observed event). */
+  startedAt: number;
+  finishedAt: number | null;
+  /** Observed stage transitions, in order; durations derive from timestamps. */
+  stages: PairStage[];
+}
+
+const pairLog = ref<PairRow[]>([]);
 const writeErrors = ref<string[]>([]);
 const usage = ref({ prompt: 0, completion: 0, total: 0, cached: 0, calls: 0 });
 const sseConnected = ref(false);
 const eventBox = ref<HTMLDivElement | null>(null);
+const now = ref(Date.now());
 let pollTimer: number | null = null;
+let tickTimer: number | null = null;
+
+// 当前活跃翻译对的阶段耗时（每秒刷新）；完成后不再显示，避免「已完成却还在计时」。
+const activePair = computed(() => {
+  if (finished.value) return null;
+  return pairLog.value.find((p) => p.done < (p.total || 1)) ?? pairLog.value[pairLog.value.length - 1] ?? null;
+});
+const activeElapsed = computed(() => {
+  if (!activePair.value || !activePair.value.phaseStart) return 0;
+  return Math.max(0, Math.floor((now.value - activePair.value.phaseStart) / 1000));
+});
 
 const statusMeta = computed(() => {
   const status = summary.value?.status ?? "queued";
@@ -57,6 +90,76 @@ function fileName(path: string) {
   return path.split("/").pop() ?? path;
 }
 
+// 语言码 -> 英文名（en -> English），与提交页一致。
+const LANG_CODES: Record<string, string> = {
+  "zh-CN": "Chinese",
+  en: "English",
+  ja: "Japanese",
+  ko: "Korean",
+  de: "German",
+  fr: "French",
+  es: "Spanish",
+  ru: "Russian",
+};
+const langName = (code: string) => LANG_CODES[code] ?? code;
+
+const STAGE_LABELS: Record<string, string> = {
+  parse: "解析分块",
+  brief: "文档摘要",
+  glossary: "术语表",
+  translate: "翻译",
+  review: "审校",
+  render: "渲染写文件",
+};
+const stageLabel = (phase: string) => STAGE_LABELS[phase] ?? phase;
+
+// Canonical pipeline order; stages whose events never arrived by the time a
+// later stage started were skipped (e.g. cached brief/glossary).
+const STAGE_ORDER = ["parse", "brief", "glossary", "translate", "review", "render"];
+
+function fmtDur(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+function pairElapsed(pair: PairRow): number {
+  return ((pair.finishedAt ?? now.value) - pair.startedAt) / 1000;
+}
+
+interface TimelineStep {
+  phase: string;
+  label: string;
+  status: "done" | "current" | "skipped" | "pending";
+  duration: string;
+}
+
+function timeline(pair: PairRow): TimelineStep[] {
+  const observed = new Map(pair.stages.map((stage) => [stage.phase, stage]));
+  const lastPhase = pair.stages[pair.stages.length - 1]?.phase ?? "";
+  const lastIdx = STAGE_ORDER.indexOf(lastPhase);
+  return STAGE_ORDER.map((phase, index) => {
+    const stage = observed.get(phase);
+    const label =
+      phase === "translate" && pair.total ? `${stageLabel(phase)} ${pair.done}/${pair.total}` : stageLabel(phase);
+    if (stage) {
+      const seconds = stage.end !== null ? (stage.end - stage.start) / 1000 : (now.value - stage.start) / 1000;
+      return { phase, label, status: stage.end !== null ? "done" : "current", duration: fmtDur(seconds) };
+    }
+    if (lastIdx >= 0 && index < lastIdx) return { phase, label, status: "skipped", duration: "—" };
+    return { phase, label, status: "pending", duration: "—" };
+  });
+}
+
+/** Compact per-pair badge: "翻译 42s" while running, "完成" when done. */
+function stageBadge(pair: PairRow): string {
+  if (pair.total && pair.done >= pair.total) return "完成";
+  const last = pair.stages[pair.stages.length - 1];
+  if (!last) return "";
+  const seconds = last.end !== null ? (last.end - last.start) / 1000 : (now.value - last.start) / 1000;
+  return `${stageLabel(last.phase)} ${fmtDur(seconds)}`;
+}
+
 function statusLabel(status: string) {
   return { completed: "已完成", failed: "失败", cancelled: "已取消" }[status] ?? status;
 }
@@ -87,8 +190,9 @@ function onEvent(event: JobEvent) {
   }
   if (event.type === "pair_start") {
     // A pair is known the moment it starts (bundles = total count), so show its
-    // progress row immediately instead of waiting for the first bundle to
-    // finish — that first update used to lag a full bundle translation.
+    // progress row immediately instead of waiting for the first bundle.
+    // phase stays empty until a real stage event arrives — assuming "parse"
+    // here showed a stale stage label forever on older sidecars.
     const key = `${event.input}|${event.lang}`;
     if (!pairLog.value.some((p) => p.key === key)) {
       pairLog.value.push({
@@ -97,18 +201,58 @@ function onEvent(event: JobEvent) {
         lang: event.lang ?? "",
         done: 0,
         total: event.bundles ?? event.total ?? 0,
+        phase: "",
+        phaseStart: event.ts * 1000,
+        startedAt: event.ts * 1000,
+        finishedAt: null,
+        stages: [],
       });
     }
-    currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;
+    currentPair.value = `${fileName(event.input ?? "")} → ${langName(event.lang ?? "")}`;
+  }
+  if (event.type === "stage") {
+    const key = `${event.input}|${event.lang}`;
+    let pair = pairLog.value.find((p) => p.key === key);
+    if (!pair) {
+      pair = {
+        key,
+        input: fileName(event.input ?? ""),
+        lang: event.lang ?? "",
+        done: 0,
+        total: 0,
+        phase: "",
+        phaseStart: event.ts * 1000,
+        startedAt: event.ts * 1000,
+        finishedAt: null,
+        stages: [],
+      };
+      pairLog.value.push(pair);
+    }
+    const ts = event.ts * 1000;
+    const phase = event.phase ?? "";
+    const last = pair.stages[pair.stages.length - 1];
+    // SSE replay re-delivers events; identical consecutive phases are dupes.
+    if (!last || last.phase !== phase) {
+      if (last) last.end = ts;
+      pair.stages.push({ phase, start: ts, end: null });
+      pair.phase = phase;
+      pair.phaseStart = ts;
+      const parts: string[] = [];
+      if (last) parts.push(`${stageLabel(last.phase)} 完成（${fmtDur((ts - last.start) / 1000)}）`);
+      parts.push(`${stageLabel(phase)} 开始`);
+      (event as JobEvent & { stageText?: string }).stageText = parts.join(" · ");
+    }
   }
   if (event.type === "progress") {
-    currentPair.value = `${fileName(event.input ?? "")} → ${event.lang}`;
+    currentPair.value = `${fileName(event.input ?? "")} → ${langName(event.lang ?? "")}`;
     pairProgress.value = { done: event.done ?? 0, total: event.total ?? 0 };
     const key = `${event.input}|${event.lang}`;
-    const last = pairLog.value[pairLog.value.length - 1];
-    if (last && last.key === key) {
-      last.done = event.done ?? 0;
-      last.total = event.total ?? 0;
+    // Find by key across the whole list — the previous "last item only" check
+    // duplicated a pair whenever two pairs interleaved their progress events.
+    const existing = pairLog.value.find((p) => p.key === key);
+    if (existing) {
+      existing.done = event.done ?? 0;
+      existing.total = event.total ?? 0;
     } else {
       pairLog.value.push({
         key,
@@ -116,16 +260,37 @@ function onEvent(event: JobEvent) {
         lang: event.lang ?? "",
         done: event.done ?? 0,
         total: event.total ?? 0,
+        phase: "",
+        phaseStart: event.ts * 1000,
+        startedAt: event.ts * 1000,
+        finishedAt: null,
+        stages: [],
       });
     }
   }
-  if (event.type === "pair_done" && event.write_error) {
-    writeErrors.value.push(`${fileName(event.input ?? "")} → ${event.lang}`);
+  if (event.type === "pair_done") {
+    const pair = pairLog.value.find((p) => p.key === `${event.input}|${event.lang}`);
+    if (pair) {
+      pair.finishedAt = event.ts * 1000;
+      const last = pair.stages[pair.stages.length - 1];
+      if (last && last.end === null) last.end = event.ts * 1000;
+      if (pair.total) pair.done = pair.total;
+    }
+    if (event.write_error) {
+      writeErrors.value.push(`${fileName(event.input ?? "")} → ${event.lang}`);
+    }
   }
   if (event.type === "status") {
     if (summary.value) summary.value.status = event.status ?? summary.value.status;
     if (["completed", "failed", "cancelled"].includes(event.status ?? "")) {
       finished.value = true;
+      // Freeze any still-open stage timers so the timeline shows final durations.
+      const ts = event.ts * 1000;
+      for (const pair of pairLog.value) {
+        if (pair.finishedAt === null) pair.finishedAt = ts;
+        const last = pair.stages[pair.stages.length - 1];
+        if (last && last.end === null) last.end = ts;
+      }
       void maybeNotify(event.status ?? "");
     }
   }
@@ -182,10 +347,15 @@ onMounted(() => {
   pollTimer = window.setInterval(() => {
     if (!finished.value) void refresh();
   }, 5000);
+  // Tick for the stage-elapsed display.
+  tickTimer = window.setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
 });
 
 onBeforeUnmount(() => {
   if (pollTimer !== null) window.clearInterval(pollTimer);
+  if (tickTimer !== null) window.clearInterval(tickTimer);
 });
 </script>
 
@@ -230,6 +400,60 @@ onBeforeUnmount(() => {
             <span class="text-xl font-bold">{{ percent }}%</span>
           </div>
           <p class="text-sm text-base-content/70">{{ currentPair || "等待开始…" }}</p>
+          <p v-if="activePair?.phase" class="text-xs text-primary">
+            当前阶段：{{ stageLabel(activePair.phase) }}
+            <span class="text-base-content/50">· 本阶段 {{ fmtDur(activeElapsed) }} · 对内总耗时 {{ fmtDur(pairElapsed(activePair)) }}</span>
+          </p>
+          <!-- Fallback when the sidecar never sends stage events: show the pair's
+               total runtime instead of guessing a (possibly wrong) stage name. -->
+          <p v-else-if="activePair" class="text-xs text-base-content/50">
+            已运行 {{ fmtDur(pairElapsed(activePair)) }} · 等待阶段事件…
+          </p>
+          <!-- 阶段时间轴：已完成阶段定格耗时，当前阶段实时跳秒 -->
+          <ul v-if="activePair && activePair.stages.length" class="mt-1 flex w-full items-start">
+            <li v-for="(step, i) in timeline(activePair)" :key="step.phase" class="flex min-w-0 flex-1 flex-col items-center">
+              <div class="flex w-full items-center">
+                <div
+                  v-if="i > 0"
+                  class="h-0.5 flex-1"
+                  :class="step.status === 'pending' ? 'bg-base-300' : step.status === 'current' ? 'bg-primary' : 'bg-success'"
+                ></div>
+                <div
+                  class="h-3 w-3 shrink-0 rounded-full border-2"
+                  :class="{
+                    'bg-success border-success': step.status === 'done',
+                    'bg-primary border-primary': step.status === 'current',
+                    'bg-base-100 border-base-300': step.status === 'pending' || step.status === 'skipped',
+                  }"
+                ></div>
+                <div
+                  v-if="i < STAGE_ORDER.length - 1"
+                  class="h-0.5 flex-1"
+                  :class="step.status === 'pending' || step.status === 'skipped' ? 'bg-base-300' : 'bg-success'"
+                ></div>
+              </div>
+              <p
+                class="mt-1 truncate text-[11px] leading-tight"
+                :class="{
+                  'font-medium text-primary': step.status === 'current',
+                  'text-base-content/60': step.status === 'done',
+                  'text-base-content/30': step.status === 'pending' || step.status === 'skipped',
+                }"
+                :title="step.status === 'skipped' ? '已跳过' : step.label"
+              >
+                {{ step.label }}
+              </p>
+              <p
+                class="text-[10px] leading-tight tabular-nums"
+                :class="{
+                  'text-base-content/50': step.status === 'done' || step.status === 'current',
+                  'text-base-content/25': step.status === 'pending' || step.status === 'skipped',
+                }"
+              >
+                {{ step.status === 'current' ? `${step.duration}…` : step.duration }}
+              </p>
+            </li>
+          </ul>
           <p class="text-xs text-base-content/50">
             {{ donePairs }}/{{ summary?.pairs.length ?? "?" }} 对完成 · {{ inFlightPairs }} 对进行中 ·
             bundle {{ pairProgress.done }}/{{ pairProgress.total || "?" }}
@@ -268,9 +492,12 @@ onBeforeUnmount(() => {
           <!-- 每翻译对进度 -->
           <ul v-if="pairLog.length" class="mt-2 flex flex-col gap-2">
             <li v-for="(pair, index) in pairLog" :key="`${pair.input}-${pair.lang}-${index}`" class="text-xs">
-              <div class="mb-1 flex justify-between text-base-content/70">
-                <span class="font-mono">{{ pair.input }} → {{ pair.lang }}</span>
-                <span>{{ pair.done }}/{{ pair.total }}</span>
+              <div class="mb-1 flex items-center justify-between gap-2 text-base-content/70">
+                <span class="font-mono">{{ pair.input }} → {{ langName(pair.lang) }}</span>
+                <span class="flex items-center gap-2">
+                  <span v-if="stageBadge(pair)" class="badge badge-xs" :class="pair.total && pair.done >= pair.total ? 'badge-success' : 'badge-ghost'">{{ stageBadge(pair) }}</span>
+                  <span class="tabular-nums">{{ pair.done }}/{{ pair.total }}</span>
+                </span>
               </div>
               <progress
                 class="progress progress-primary h-1.5 w-full"
@@ -290,10 +517,11 @@ onBeforeUnmount(() => {
         <div ref="eventBox" class="max-h-60 overflow-y-auto rounded-xl bg-base-200 p-3 font-mono text-xs leading-5">
           <p v-for="event in events" :key="event.seq" class="text-base-content/70">
             <span class="text-base-content/40">{{ new Date(event.ts * 1000).toLocaleTimeString() }}</span>
-            <template v-if="event.type === 'progress'"> · {{ event.input?.split("/").pop() }} → {{ event.lang }}（{{ event.done }}/{{ event.total }}）</template>
+            <template v-if="event.type === 'stage'"> · <span class="text-primary">{{ event.stageText ?? stageLabel(event.phase ?? "") }}</span> {{ fileName(event.input ?? "") }} → {{ langName(event.lang ?? "") }}</template>
+            <template v-else-if="event.type === 'progress'"> · {{ fileName(event.input ?? "") }} → {{ langName(event.lang ?? "") }}（{{ event.done }}/{{ event.total }}）</template>
             <template v-else-if="event.type === 'status'"> · {{ event.status }}</template>
-            <template v-else-if="event.type === 'pair_start'"> · 开始 {{ event.input?.split("/").pop() }} → {{ event.lang }}</template>
-            <template v-else-if="event.type === 'pair_done'"> · 完成 {{ event.input?.split("/").pop() }} → {{ event.lang }}</template>
+            <template v-else-if="event.type === 'pair_start'"> · 开始 {{ fileName(event.input ?? "") }} → {{ langName(event.lang ?? "") }}</template>
+            <template v-else-if="event.type === 'pair_done'"> · 完成 {{ fileName(event.input ?? "") }} → {{ langName(event.lang ?? "") }}</template>
             <template v-else> · {{ event.type }}</template>
           </p>
           <p v-if="!events.length" class="text-base-content/40">等待事件…</p>

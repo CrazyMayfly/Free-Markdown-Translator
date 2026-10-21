@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api, ApiError, type JobSummary } from "../api/client";
+import { confirmAction } from "../confirm";
 
 const router = useRouter();
 const jobs = ref<JobSummary[]>([]);
@@ -64,7 +65,10 @@ async function reuse(job: JobSummary) {
 }
 
 async function remove(job: JobSummary) {
-  if (!window.confirm("确定要从历史记录中删除该任务吗？（不会删除已产出的译文文件）")) return;
+  const ok = await confirmAction("确定要从历史记录中删除该任务吗？（不会删除已产出的译文文件）", {
+    confirmLabel: "删除",
+  });
+  if (!ok) return;
   deletingId.value = job.id;
   try {
     await api.deleteHistory(job.id);

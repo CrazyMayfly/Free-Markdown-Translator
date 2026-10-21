@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { api, type AppConfig, type GlossaryEntry } from "../api/client";
+import { confirmAction } from "../confirm";
+
+const router = useRouter();
 
 const config = ref<AppConfig | null>(null);
 const configPath = ref("");
@@ -21,11 +24,7 @@ const dirty = computed(() => {
   return JSON.stringify(config.value) !== savedSnapshot.value || apiKeyInput.value !== "";
 });
 
-const termsText = ref("");
-const instructionsText = ref("");
-
-const glossaryLang = ref("zh-CN");
-const glossaryEntries = ref<GlossaryEntry[]>([]);
+const glossaryLang = ref("zh-CN");const glossaryEntries = ref<GlossaryEntry[]>([]);
 const glossaryQuery = ref("");
 const newTerm = ref("");
 const newRendering = ref("");
@@ -52,8 +51,6 @@ async function load() {
     // into their key and overwrite the real one. Leave it blank instead.
     apiKeyInput.value = "";
     hasStoredKey.value = Boolean(data.config.provider.api_key);
-    termsText.value = data.config.style.preserve_terms.join(", ");
-    instructionsText.value = data.config.style.instructions.join("\n");
     // Snapshot for dirty tracking (after the strict->quality normalisation).
     savedSnapshot.value = JSON.stringify(config.value);
   } catch (error) {
@@ -107,6 +104,27 @@ async function deleteGlossaryEntry(term: string) {
   }
 }
 
+const GLOSSARY_STATUSES = [
+  { value: "pending", label: "待生效" },
+  { value: "active", label: "生效" },
+  { value: "excluded", label: "排除" },
+];
+const glossaryStatusBadge = (status: string) =>
+  status === "active" ? "badge-primary" : status === "excluded" ? "badge-error" : "badge-warning";
+
+async function setGlossaryStatus(entry: GlossaryEntry, status: string) {
+  if (entry.status === status) return;
+  glossaryBusy.value = true;
+  try {
+    await api.glossarySetStatus(glossaryLang.value, entry.term, status);
+    await loadGlossary();
+  } catch (error) {
+    show(String(error), "error");
+  } finally {
+    glossaryBusy.value = false;
+  }
+}
+
 function show(text: string, kind: "success" | "error") {
   message.value = text;
   messageKind.value = kind;
@@ -132,14 +150,6 @@ async function save() {
       input: config.value.input,
       style: {
         ...config.value.style,
-        preserve_terms: termsText.value
-          .split(/[,,，]/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-        instructions: instructionsText.value
-          .split("\n")
-          .map((item) => item.trim())
-          .filter(Boolean),
       },
       output: config.value.output,
       execution: config.value.execution,
@@ -195,15 +205,27 @@ async function testConnection() {
 }
 
 async function clearMemory() {
-  if (!window.confirm("确定要清空全部翻译记忆吗？此操作不可恢复。")) return;
+  const ok = await confirmAction("确定要清空全部翻译记忆吗？此操作不可恢复。", {
+    confirmLabel: "清空",
+  });
+  if (!ok) return;
   const removed = await api.clearMemory();
   show(`已清除 ${removed.removed} 条翻译记忆`, "success");
   memoryStats.value = await api.memoryStats();
 }
 
-onBeforeRouteLeave(() => {
-  if (dirty.value && !window.confirm("有未保存的更改，确定离开吗？")) return false;
-  return true;
+// window.confirm does not work in the Tauri webview (silently returns false),
+// which used to block ALL navigation away from a dirty config page. Block the
+// first attempt, ask via the in-app dialog, and continue programmatically.
+let forceLeave = false;
+onBeforeRouteLeave((to) => {
+  if (forceLeave || !dirty.value) return true;
+  void confirmAction("有未保存的更改，确定离开吗？", { confirmLabel: "离开" }).then((ok) => {
+    if (!ok) return;
+    forceLeave = true;
+    void router.push(to.fullPath);
+  });
+  return false;
 });
 
 function beforeUnload(event: BeforeUnloadEvent) {
@@ -291,62 +313,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 翻译偏好（基础） -->
-        <div class="card bg-base-100 shadow-sm">
-          <div class="card-body gap-3">
-            <h2 class="card-title text-base">翻译设置</h2>
-            <label class="form-control">
-              <span class="label-text pb-1">质量与速度</span>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="option in [['fast', '快速', '⚡'], ['balanced', '平衡', '⚖️'], ['quality', '质量', '🎯']]"
-                  :key="option[0]"
-                  type="button"
-                  class="btn btn-sm"
-                  :class="config.pipeline.mode === option[0] ? 'btn-primary' : 'btn-ghost'"
-                  :aria-pressed="config.pipeline.mode === option[0]"
-                  @click="config.pipeline.mode = option[0]"
-                >
-                  <span class="mr-1">{{ option[2] }}</span>{{ option[1] }}
-                </button>
-              </div>
-            </label>
-            <label class="form-control">
-              <span class="label-text pb-1">目标语言（多个用逗号分隔）</span>
-              <input
-                class="input input-bordered input-sm"
-                :value="config.target_languages.join(', ')"
-                @change="config.target_languages = ($event.target as HTMLInputElement).value.split(/[,,，]/).map(s => s.trim()).filter(Boolean)"
-              />
-            </label>
-            <label class="form-control">
-              <span class="label-text pb-1">输出目录</span>
-              <input v-model="config.output.directory" class="input input-bordered input-sm font-mono" />
-            </label>
-          </div>
-        </div>
-
-        <!-- 文风（基础，通俗） -->
-        <div class="card bg-base-100 shadow-sm">
-          <div class="card-body gap-3">
-            <h2 class="card-title text-base">文风</h2>
-            <div class="grid grid-cols-2 gap-3">
-              <label class="form-control">
-                <span class="label-text pb-1">文风</span>
-                <input v-model="config.style.tone" class="input input-bordered input-sm" placeholder="如：轻松、正式、technical" />
-              </label>
-              <label class="form-control">
-                <span class="label-text pb-1">目标读者</span>
-                <input v-model="config.style.audience" class="input input-bordered input-sm" placeholder="如：developers" />
-              </label>
-            </div>
-            <label class="form-control">
-              <span class="label-text pb-1">保留原文的术语（逗号分隔）</span>
-              <input v-model="termsText" class="input input-bordered input-sm" placeholder="Markdown, OpenAI, Python" />
-            </label>
-          </div>
-        </div>
-
         <!-- 记忆与译名（基础，可管理） -->
         <div class="card bg-base-100 shadow-sm">
           <div class="card-body gap-3">
@@ -365,13 +331,6 @@ onBeforeUnmount(() => {
                 清空记忆
               </button>
             </div>
-            <label class="form-control">
-              <span class="label-text pb-1">
-                文档摘要缓存路径
-                <span class="ml-1 text-xs text-base-content/50">全文摘要（Brief）的本地缓存，命中时不调用模型</span>
-              </span>
-              <input v-model="config.memory.brief_path" class="input input-bordered input-sm font-mono" placeholder=".mdtx/briefs.sqlite3" />
-            </label>
             <h3 class="pt-1 text-sm font-semibold">术语表</h3>
             <p class="text-xs text-base-content/60">为术语指定统一译法，全文保持一致；手动条目优先于自动生成。</p>
             <div class="flex flex-wrap items-end gap-2">
@@ -404,6 +363,8 @@ onBeforeUnmount(() => {
                       <th>词</th>
                       <th>译法</th>
                       <th>来源</th>
+                      <th>出现篇数</th>
+                      <th>状态</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -416,6 +377,20 @@ onBeforeUnmount(() => {
                           {{ entry.origin === "user" ? "手动" : "自动" }}
                         </span>
                       </td>
+                      <td class="text-center tabular-nums">{{ entry.doc_count }}</td>
+                      <td>
+                        <select
+                          class="select select-bordered select-xs"
+                          :class="glossaryStatusBadge(entry.status)"
+                          :disabled="glossaryBusy"
+                          :value="entry.status"
+                          @change="setGlossaryStatus(entry, ($event.target as HTMLSelectElement).value)"
+                        >
+                          <option v-for="s in GLOSSARY_STATUSES" :key="s.value" :value="s.value">
+                            {{ s.label }}
+                          </option>
+                        </select>
+                      </td>
                       <td class="text-right">
                         <button class="btn btn-ghost btn-xs text-error" :disabled="glossaryBusy" @click="deleteGlossaryEntry(entry.term)">
                           删除
@@ -423,11 +398,14 @@ onBeforeUnmount(() => {
                       </td>
                     </tr>
                     <tr v-if="!filteredGlossary.length">
-                      <td colspan="4" class="text-center text-base-content/50">没有匹配「{{ glossaryQuery }}」的术语</td>
+                      <td colspan="6" class="text-center text-base-content/50">没有匹配「{{ glossaryQuery }}」的术语</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
+              <p class="text-xs text-base-content/50">
+                自动术语：在 3 篇不同文档中出现后为「待生效」，第 4 篇起自动「生效」并注入翻译提示词；「排除」则永不注入。
+              </p>
             </div>
             <p v-else class="text-sm text-base-content/50">还没有固定译名，直接在上方添加即可。</p>
           </div>
@@ -579,12 +557,6 @@ onBeforeUnmount(() => {
                   </select>
                 </label>
               </div>
-            </section>
-
-            <!-- 附加指令 -->
-            <section class="flex flex-col gap-3">
-              <h3 class="text-sm font-semibold">附加指令（每行一条）</h3>
-              <textarea v-model="instructionsText" class="textarea textarea-bordered textarea-sm" rows="3"></textarea>
             </section>
           </div>
         </details>

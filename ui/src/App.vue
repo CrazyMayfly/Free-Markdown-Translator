@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, computed } from "vue";
 import { RouterLink, RouterView, useRouter } from "vue-router";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 import { getApiBase } from "./api/client";
-import { checkConnection, connection } from "./connection";
+import { checkConnection, connection, supportsFeature } from "./connection";
 import { isTauri } from "./tauri";
 
 const router = useRouter();
@@ -27,6 +28,10 @@ onMounted(() => {
     void checkConnection();
   }, 30000);
 });
+
+// A connected but feature-stale sidecar (e.g. packaged before stage events
+// existed) would silently degrade the status page — surface it instead.
+const staleBackend = computed(() => connection.online && !supportsFeature("stage-events"));
 
 function retryConnection() {
   // In the Tauri shell a missed handshake can only be recovered by re-running
@@ -99,6 +104,13 @@ const navItems = [
     <!-- 内容区 -->
     <div class="flex min-w-0 flex-1 flex-col">
       <div
+        v-if="staleBackend"
+        role="alert"
+        class="alert alert-warning rounded-none py-2 text-sm"
+      >
+        <span class="truncate">后端版本过旧，任务状态将缺少实时阶段信息。请重新打包应用（npx tauri build）以更新后端。</span>
+      </div>
+      <div
         v-if="!connection.online && !connection.checking"
         role="alert"
         class="alert alert-warning rounded-none py-2 text-sm"
@@ -112,5 +124,7 @@ const navItems = [
         </div>
       </main>
     </div>
+
+    <ConfirmDialog />
   </div>
 </template>

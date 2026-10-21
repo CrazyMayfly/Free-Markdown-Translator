@@ -17,6 +17,10 @@ export interface JobEvent {
   usage?: Record<string, number>;
   results?: unknown[];
   write_error?: string;
+  phase?: string;
+  detail?: string;
+  /** Frontend-enriched label for stage events ("解析分块 完成（2s） · 翻译 开始"). */
+  stageText?: string;
 }
 
 export type JobEventHandler = (event: JobEvent) => void;
@@ -32,7 +36,7 @@ export function useJobEvents(jobId: string, onEvent: JobEventHandler, onEnd?: (s
     source.onopen = () => {
       connected.value = true;
     };
-    const types = ["status", "pair_start", "progress", "pair_done"];
+    const types = ["status", "pair_start", "stage", "progress", "pair_done"];
     for (const type of types) {
       source.addEventListener(type, (raw) => {
         const event = JSON.parse((raw as MessageEvent).data) as JobEvent;

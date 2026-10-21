@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import MarkdownIt from "markdown-it";
+import { MdPreview } from "md-editor-v3";
+import "md-editor-v3/lib/preview.css";
 import { api, ApiError, type JobDetail, type JobResult, type SegmentPair } from "../api/client";
 
-const md = new MarkdownIt({ html: false, linkify: true });
-// Links in the rendered translation must not navigate the whole app away (in
-// the Tauri webview that replaces the app with the external site).
-const defaultLinkOpen =
-  md.renderer.rules.link_open ??
-  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  tokens[idx].attrSet("target", "_blank");
-  tokens[idx].attrSet("rel", "noopener noreferrer");
-  return defaultLinkOpen(tokens, idx, options, env, self);
-};
+// The markdown preview must follow the app theme (daisyUI "dim" == dark),
+// otherwise the dark app shows a blinding white preview page.
+const mdTheme = ref<"light" | "dark">(
+  document.documentElement.getAttribute("data-theme") === "dim" ? "dark" : "light",
+);
+let themeObserver: MutationObserver | null = null;
+
 const route = useRoute();
 const router = useRouter();
 const jobId = String(route.params.id ?? "");
@@ -33,7 +30,6 @@ const toast = ref<{ kind: "success" | "error"; message: string } | null>(null);
 let toastTimer: number | null = null;
 
 const result = computed<JobResult | null>(() => detail.value?.results[activeIndex.value] ?? null);
-const rendered = computed(() => (result.value ? md.render(result.value.translated_markdown) : ""));
 
 function fileName(path: string) {
   return path.split("/").pop() ?? path;
@@ -139,6 +135,12 @@ async function saveEdit(segment: SegmentPair) {
 }
 
 onMounted(async () => {
+  // Track the daisyUI theme attribute so the preview re-themes live when the
+  // user flips the dark-mode toggle in the sidebar.
+  themeObserver = new MutationObserver(() => {
+    mdTheme.value = document.documentElement.getAttribute("data-theme") === "dim" ? "dark" : "light";
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   try {
     detail.value = await api.getJob(jobId);
   } catch (error) {
@@ -147,6 +149,8 @@ onMounted(async () => {
     loading.value = false;
   }
 });
+
+onBeforeUnmount(() => themeObserver?.disconnect());
 </script>
 
 <template>
@@ -289,12 +293,16 @@ onMounted(async () => {
         </div>
 
         <!-- 渲染视图 -->
-        <article
-          v-if="viewMode === 'render'"
-          class="card bg-base-100 shadow-sm prose prose-sm max-w-none p-6"
-          :lang="result.target_lang"
-          v-html="rendered"
-        ></article>
+        <div v-if="viewMode === 'render'" class="card bg-base-100 shadow-sm overflow-hidden">
+          <MdPreview
+            :model-value="result.translated_markdown"
+            :theme="mdTheme"
+            preview-theme="github"
+            :lang="result.target_lang"
+            class="p-6"
+            editor-id="result-preview"
+          />
+        </div>
 
         <!-- 分段对照（译文可修订） -->
         <div v-else class="card overflow-hidden bg-base-100 shadow-sm">
