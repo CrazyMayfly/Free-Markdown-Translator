@@ -13,7 +13,7 @@ from src.agents.prompts import build_reviewer_prompts, build_translator_prompts
 from src.agents.translator_agent import TranslatorAgent
 from src.core.types import DocumentContext, SegmentBundle, TranslationResult
 from src.llm.client import OpenAIProvider
-from src.llm.schemas import TRANSLATION_RESPONSE_SCHEMA
+from src.llm.schemas import TRANSLATION_COMPACT_SCHEMA, TRANSLATION_RESPONSE_SCHEMA
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
 from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider
@@ -67,20 +67,22 @@ def _make_bundle() -> tuple[SegmentBundle, DocumentContext]:
 
 
 class PromptContextInjectionTests(unittest.TestCase):
-    def test_translator_prompt_injects_prev_summary_and_terms(self) -> None:
+    def test_translator_prompt_injects_prev_summary_and_brief(self) -> None:
         bundle, context = _make_bundle()
         _, user_prompt = build_translator_prompts(bundle, context, "zh-CN")
-        self.assertIn("PREV BUNDLE SUMMARY", user_prompt)
-        self.assertIn("Preserve these terms: FooBar, BazQux", user_prompt)
-        self.assertIn("Sample Doc", user_prompt)
-        self.assertIn("developers", user_prompt)
+        payload = json.loads(user_prompt)
+        self.assertIn("PREV", payload["prev"])
+        self.assertEqual(payload["brief"]["s"], "Intro paragraph about the tool.")
+        self.assertEqual(payload["brief"]["tone"], "technical")
+        self.assertEqual(payload["brief"]["aud"], "developers")
+        self.assertIn("sections", payload)
 
     def test_translator_prompt_orders_stable_context_first(self) -> None:
         bundle, context = _make_bundle()
         _, user_prompt = build_translator_prompts(bundle, context, "zh-CN")
         payload = json.loads(user_prompt)
-        self.assertEqual(list(payload.keys()), ["task", "ctx", "prev_summary", "segments"])
-        # ctx must be identical across bundles of one document for prefix caching.
+        self.assertEqual(list(payload.keys()), ["task", "lang", "brief", "prev", "sections"])
+        # The document-level brief must be identical across bundles.
         other = SegmentBundle(
             bundle_id="bundle-1",
             segments=bundle.segments[:1],
@@ -89,7 +91,7 @@ class PromptContextInjectionTests(unittest.TestCase):
             style_instructions=[],
         )
         other_payload = json.loads(build_translator_prompts(other, context, "zh-CN")[1])
-        self.assertEqual(payload["ctx"], other_payload["ctx"])
+        self.assertEqual(payload["brief"], other_payload["brief"])
 
     def test_reviewer_prompt_injects_prev_summary(self) -> None:
         bundle, context = _make_bundle()
@@ -106,7 +108,7 @@ class PromptContextInjectionTests(unittest.TestCase):
         bundle, context = _make_bundle()
         provider = FakeProvider()
         TranslatorAgent(provider).translate_bundle(bundle=bundle, context=context, target_lang="zh-CN")
-        self.assertIs(provider.schemas[-1], TRANSLATION_RESPONSE_SCHEMA)
+        self.assertIs(provider.schemas[-1], TRANSLATION_COMPACT_SCHEMA)
 
 
 class StructuredOutputsTests(unittest.TestCase):

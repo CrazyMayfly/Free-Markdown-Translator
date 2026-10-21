@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from src.core.types import DocumentContext, SegmentBundle, TranslationResult
+from src.core.modes import ModeProfile, profile_for
+from src.core.types import DocumentBrief, DocumentContext, SegmentBundle, TranslationResult
 
 _OUTPUT_CONTRACT = (
     'Return JSON only: {"translations":[{"segment_id":"...","translated_text":"...",'
@@ -38,75 +39,178 @@ def _document_context_payload(context: DocumentContext) -> dict:
     return payload
 
 
-def _block_registry(bundle: SegmentBundle) -> dict[str, str]:
-    """Deduplicate adjacent code/HTML blocks across one bundle.
+def _fallback_brief(context: DocumentContext) -> DocumentBrief:
+    """Use deterministic context when the Brief pass was skipped or failed."""
+    brief = context.brief
+    tone = brief.tone
+    if not tone:
+        for line in context.style_guide:
+            if line.lower().startswith("tone:"):
+                tone = line.split(":", 1)[1].strip()
+                break
+    return DocumentBrief(
+        summary=brief.summary or context.abstract,
+        tone=tone,
+        audience=brief.audience or context.audience,
+        glossary=brief.glossary or dict(context.glossary),
+        section_summaries=brief.section_summaries or dict(context.section_summaries),
+    )
 
-    A block is adjacency for the paragraph above *and* the paragraph below, so
-    inlining it per segment shipped the same text twice whenever both segments
-    landed in the same bundle — measured at ~50% of all context tokens. The
-    bundle now carries each block once and segments point at it by id.
-    """
-    registry: dict[str, str] = {}
-    seen: set[str] = set()
+
+def _brief_glossary_pairs(brief: DocumentBrief, bundle: SegmentBundle, limit: int = 30) -> list[list[str]]:
+    text = " ".join(segment.source_text for segment in bundle.segments).casefold()
+    pairs: list[list[str]] = []
+    for term, rendering in brief.glossary.items():
+        if term.casefold() not in text:
+            continue
+        pairs.append([term, rendering])
+        if len(pairs) >= limit:
+            break
+    return pairs
+
+
+def _bundle_blocks(bundle: SegmentBundle, profile: ModeProfile) -> tuple[dict[str, str], dict[str, str]]:
+    """Return (block id -> text, segment id -> space separated block ids)."""
+    if not profile.blocks or profile.block_chars <= 0:
+        return {}, {}
+    by_text: dict[str, str] = {}
+    refs: dict[str, str] = {}
+
+    def add(text: str) -> str:
+        truncated = str(text)[: profile.block_chars]
+        if truncated not in by_text:
+            by_text[truncated] = f"b{len(by_text)}"
+        return by_text[truncated]
+
     for segment in bundle.segments:
+        segment_refs: list[str] = []
         for key in ("context_before", "context_after"):
             for text in segment.metadata.get(key) or []:
-                if text in seen:
-                    continue
-                seen.add(text)
-                registry[f"b{len(registry)}"] = str(text)
-    return registry
+                segment_refs.append(add(str(text)))
+        header = segment.metadata.get("table_header")
+        if header and not segment.metadata.get("is_header"):
+            segment_refs.append(add(str(header)))
+        if segment_refs:
+            # Preserve order but drop duplicates from the same segment.
+            refs[segment.segment_id] = " ".join(dict.fromkeys(segment_refs))
+
+    blocks = {block_id: text for text, block_id in by_text.items()}
+    return blocks, refs
 
 
-def build_translator_prompts(bundle: SegmentBundle, context: DocumentContext, target_lang: str) -> tuple[str, str]:
-    system_prompt = (
-        f"You are an expert Markdown translation specialist. Detect the source language automatically and translate markdown text to {target_lang}. "
-        "Input JSON fields: task=job type, ctx=shared document hints, prev_summary=source digest of the preceding bundle (for continuity), "
-        "anchor_translations=already-translated segments that open the current section (match their terminology and tone), "
-        "blocks=read-only code or HTML blocks referenced by this bundle (never translate them), "
-        "segments=list of units to translate, segment_id=stable output key, context=local section path, text=source text, "
-        "context_before/context_after=list of block ids adjacent to the segment (read-only; use them only to resolve phrases such as "
-        "\"this code\" or \"the output above\"), "
-        "similar=prior translations of similar source text for this segment (follow their choices unless clearly wrong), "
-        "table_header=raw header row for a table row (read-only context; never translate it). "
-        'Return JSON with "translations" (one object per input segment) and "context_requests": if some segment cannot be translated '
-        "confidently with the context shown, list {segment_id, need: similar_translations|neighbour_translations, reason} for it "
-        "and translate the rest normally; the missing context will be fetched and the bundle translated once more. "
-        "Notes=translation remarks, applied_terms=preserved terms and how they were rendered, confidence=your confidence 0.0-1.0. "
-        "Translate only text, **preserve placeholders**, URLs, code, and markdown control syntax exactly, and follow ctx.style_guide including term preservation. "
-        "Use ctx.glossary renderings verbatim and report every domain term you rendered in applied_terms."
+def _sections_payload(
+    bundle: SegmentBundle,
+    context: DocumentContext,
+    brief: DocumentBrief,
+    profile: ModeProfile,
+    refs: dict[str, str],
+) -> list[dict[str, object]]:
+    grouped: dict[str, list] = {}
+    for segment in bundle.segments:
+        path = " / ".join(segment.context_path) if segment.context_path else "Document"
+        grouped.setdefault(path, []).append(segment)
+
+    sections: list[dict[str, object]] = []
+    for path, segments in grouped.items():
+        heading = " / ".join(path.split(" / ")[-2:]) if path != "Document" else "Document"
+        entry: dict[str, object] = {"h": heading[:160]}
+        summary = brief.section_summaries.get(path) or context.section_summaries.get(path)
+        if profile.section_summary and summary:
+            entry["sum"] = summary[:200]
+        segment_entries: list[list[str]] = []
+        for segment in segments:
+            item = [segment.segment_id, segment.source_text]
+            if segment.segment_id in refs:
+                item.append(refs[segment.segment_id])
+            segment_entries.append(item)
+        entry["segs"] = segment_entries
+        sections.append(entry)
+    return sections
+
+
+def build_translator_prompts(
+    bundle: SegmentBundle,
+    context: DocumentContext,
+    target_lang: str,
+    mode: str = "balanced",
+) -> tuple[str, str]:
+    profile = profile_for(mode)
+    brief = _fallback_brief(context)
+    glossary_pairs = _brief_glossary_pairs(brief, bundle) if profile.glossary else []
+
+    if profile.schema == "minimal":
+        system_prompt = (
+            f"Translate Markdown to {target_lang}. Return JSON only: "
+            '{"t":[["segment_id","translation"],...]} with exactly one pair per input segment. '
+            "Input fields: brief={tone,aud,g[term,rendering]}, segs=[[segment_id,text]]. "
+            "Keep placeholders, URLs, code and Markdown control syntax exactly. "
+            "Use every brief.g rendering verbatim and follow brief.tone and brief.aud. "
+            "Do not add notes, confidence or any other fields."
+        )
+        payload: dict[str, object] = {"task": "translate", "lang": target_lang}
+        brief_payload: dict[str, object] = {}
+        if brief.tone:
+            brief_payload["tone"] = brief.tone[:80]
+        if brief.audience:
+            brief_payload["aud"] = brief.audience[:80]
+        if glossary_pairs:
+            brief_payload["g"] = glossary_pairs
+        if brief_payload:
+            payload["brief"] = brief_payload
+        payload["segs"] = [[segment.segment_id, segment.source_text] for segment in bundle.segments]
+        return system_prompt, _compact_json(payload)
+
+    output_fields = (
+        '{"t":[{"i":"segment_id","x":"translation","c":0.0,"a":{},"n":[]}],"q":[]}'
+        if profile.schema == "full"
+        else '{"t":[{"i":"segment_id","x":"translation","c":0.0}],"q":[]}'
     )
-    blocks = _block_registry(bundle)
-    block_ids = {text: block_id for block_id, text in blocks.items()}
-    payload: dict[str, object] = {
-        "task": "translate",
-        "ctx": _document_context_payload(context),
-        "prev_summary": bundle.summary_before[:400] if bundle.summary_before else "",
-    }
-    if bundle.anchor_translations:
-        payload["anchor_translations"] = bundle.anchor_translations
+    system_prompt = (
+        f"Translate Markdown to {target_lang}. Return JSON only: {output_fields} with one t entry per input segment. "
+        "Input fields: brief={s,tone,aud,g[term,rendering]}, prev, anchor=[[source,translation]], "
+        "blocks={block_id:read-only text}, sections=[{h,sum,segs:[[segment_id,text,refs?]]}], "
+        "similar={segment_id:[[source,translation],...]} (prior renderings; follow unless clearly wrong). "
+        "refs is a space-separated list of block ids (code/HTML/table header) for context only; never translate blocks. "
+        "Use brief.g renderings verbatim, match brief.tone/aud, and keep placeholders, URLs, code and Markdown syntax exactly. "
+        "q is for context requests: [[segment_id,need,why]] where need is similar_translations or neighbour_translations; "
+        "leave it empty when the visible context is enough."
+    )
+    payload = {"task": "translate", "lang": target_lang}
+    brief_payload = {}
+    if profile.brief_summary and brief.summary:
+        brief_payload["s"] = brief.summary[:1200]
+    if brief.tone:
+        brief_payload["tone"] = brief.tone[:80]
+    if brief.audience:
+        brief_payload["aud"] = brief.audience[:80]
+    if glossary_pairs:
+        brief_payload["g"] = glossary_pairs
+    if brief_payload:
+        payload["brief"] = brief_payload
+    if profile.previous and bundle.summary_before:
+        payload["prev"] = bundle.summary_before[: profile.previous_chars]
+    if profile.anchor and bundle.anchor_translations:
+        payload["anchor"] = [
+            [entry.get("source", "")[:240], entry.get("text", "")[:240]]
+            for entry in bundle.anchor_translations
+        ]
+    blocks, refs = _bundle_blocks(bundle, profile)
     if blocks:
         payload["blocks"] = blocks
-    segments_payload: list[dict[str, object]] = []
-    for segment in bundle.segments:
-        entry: dict[str, object] = {
-            "segment_id": segment.segment_id,
-            "context": " / ".join(segment.context_path[-2:]) if segment.context_path else "",
-            "text": segment.source_text,
+    payload["sections"] = _sections_payload(bundle, context, brief, profile, refs)
+    if bundle.similar_examples:
+        payload["similar"] = {
+            segment_id: [[entry.get("source", ""), entry.get("translation", "")] for entry in examples]
+            for segment_id, examples in bundle.similar_examples.items()
         }
-        similar = bundle.similar_examples.get(segment.segment_id)
-        if similar:
-            entry["similar"] = similar
-        if not segment.metadata.get("is_header") and segment.metadata.get("table_header"):
-            entry["table_header"] = segment.metadata["table_header"]
-        before_refs = [block_ids[text] for text in segment.metadata.get("context_before") or [] if text in block_ids]
-        if before_refs:
-            entry["context_before"] = before_refs
-        after_refs = [block_ids[text] for text in segment.metadata.get("context_after") or [] if text in block_ids]
-        if after_refs:
-            entry["context_after"] = after_refs
-        segments_payload.append(entry)
-    payload["segments"] = segments_payload
+
+    if profile.style_guide and context.style_guide:
+        payload["guide"] = context.style_guide[:8]
+    if profile.abstract and not brief.summary and context.abstract:
+        payload["abs"] = context.abstract[:300]
+    if profile.outline and context.heading_outline:
+        payload["outline"] = [heading[:80] for heading in context.heading_outline[:60]]
+
     return system_prompt, _compact_json(payload)
 
 
@@ -346,6 +450,80 @@ def build_final_review_prompts(bundle: SegmentBundle, context: DocumentContext, 
                 "text": translation.translated_text[:240],
             }
             for segment, translation in zip(bundle.segments, translations, strict=False)
+        ],
+    }
+    return system_prompt, _compact_json(payload)
+
+
+def build_brief_prompts(
+    context: DocumentContext,
+    sample_text: str,
+    target_lang: str,
+    mode: str = "balanced",
+    part: str = "",
+) -> tuple[str, str]:
+    """One document-level pass producing the reusable summary/glossary brief.
+
+    fast asks only for tone/audience/glossary because its translate prompt does
+    not inject a summary or section map.
+    """
+    if profile_for(mode).schema == "minimal":
+        system_prompt = (
+            f"You are a translation planner for a Markdown document translated to {target_lang}. "
+            "Read it and return only the tone, audience and glossary that later calls must reuse. "
+            'Return JSON only: {"tone":"tone","aud":"target audience",'
+            '"g":[{"term":"source term","rendering":"required target rendering"}]}. '
+            "Only domain terms/product names/recurring technical concepts; each term must literally appear "
+            "in the document; skip common words; at most 30 entries; keep it compact and do not translate the document."
+        )
+    else:
+        system_prompt = (
+            f"You are a translation planner for a Markdown document that will be translated to {target_lang}. "
+            "Read the whole document and return a compact brief that every later translation call can reuse. "
+            'Return JSON only: {"s":"document summary","tone":"tone","aud":"target audience",'
+            '"g":[{"term":"source term","rendering":"required target rendering"}],'
+            '"sec":[{"h":"heading path","sum":"one-line section summary"}]}. '
+            "s: at most 200 words, focus on purpose and domain, not a translation. "
+            "g: only domain terms/product names/recurring technical concepts whose rendering must stay consistent; "
+            "each term must literally appear in the document; skip common words; at most 30 entries. "
+            "sec: one short summary per heading, using the same heading path. "
+            "Do not translate the document, do not copy long passages, and keep the JSON compact."
+        )
+    doc_limit = 12000 if profile_for(mode).schema == "minimal" else 24000
+    payload = {
+        "task": "brief",
+        "lang": target_lang,
+        "title": context.title[:120],
+        "outline": [heading[:80] for heading in context.heading_outline[:80]],
+        "doc": sample_text[:doc_limit],
+    }
+    if part:
+        payload["part"] = part
+    return system_prompt, _compact_json(payload)
+
+
+def build_brief_merge_prompts(context: DocumentContext, partials: list, target_lang: str) -> tuple[str, str]:
+    system_prompt = (
+        f"You merge partial translation briefs for a Markdown document translated to {target_lang}. "
+        'Return JSON only: {"s":"document summary","tone":"tone","aud":"target audience",'
+        '"g":[{"term":"source term","rendering":"required target rendering"}],'
+        '"sec":[{"h":"heading path","sum":"one-line section summary"}]}. '
+        "Keep the summary under 200 words, preserve every distinct section summary, deduplicate glossary terms, "
+        "drop terms that never occur in the document, and do not translate the document."
+    )
+    payload = {
+        "task": "brief_merge",
+        "lang": target_lang,
+        "title": context.title[:120],
+        "parts": [
+            {
+                "s": part.summary,
+                "tone": part.tone,
+                "aud": part.audience,
+                "g": [{"term": term, "rendering": rendering} for term, rendering in part.glossary.items()],
+                "sec": [{"h": heading, "sum": summary} for heading, summary in part.section_summaries.items()],
+            }
+            for part in partials
         ],
     }
     return system_prompt, _compact_json(payload)

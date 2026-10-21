@@ -42,6 +42,8 @@ class MemoryConfig:
     # Persistent glossary accumulated across runs (human entries win).
     glossary_persist: bool = True
     glossary_path: str = ".mdtx/glossary.sqlite3"
+    # Persistent document-brief cache (summary/glossary reused across runs).
+    brief_path: str = ".mdtx/briefs.sqlite3"
 
 
 @dataclass
@@ -54,7 +56,6 @@ class PipelineConfig:
     # automatically in balanced mode. Counted in tokens (see
     # src/core/tokens.py) so the trigger does not drift with the language.
     review_min_bundle_tokens: int = 1200
-    review_min_segments: int = 6
     review_confidence_threshold: float = 0.85
     # Reflect->improve rounds per bundle; rounds > 1 re-verify every fix.
     review_max_rounds: int = 2
@@ -71,10 +72,15 @@ class PipelineConfig:
     # Optional separate models for review/judging (breaks self-review bias).
     reviewer_model: str = ""
     judge_model: str = ""
+    # Optional per-mode model routing. Empty means provider.model. The brief
+    # model reads the whole document once and produces the summary/glossary.
+    fast_model: str = ""
+    quality_model: str = ""
+    brief_model: str = ""
     # Pull-style context: the translator may request deeper translation-memory
     # search for specific segments; the bundle is then translated once more.
     enable_context_pull: bool = True
-    # Document-level final edit (cross-bundle discourse review) in strict mode.
+    # Document-level final edit (cross-bundle discourse review) in quality mode.
     enable_final_edit: bool = True
     final_edit_max_segments: int = 300
 
@@ -86,16 +92,16 @@ class SegmentationConfig:
     # structure first; this only decides when a structural block is too large
     # and has to be split by line.
     #
-    # 3000 is about 45% of the default provider.max_tokens (8000). Translated
+    # 4000 is about half of the default provider.max_tokens (8000). Translated
     # output costs roughly as many tokens as the source, so this leaves room
     # for the JSON envelope and for one retry without hitting the cap. Raise it
     # together with max_tokens, not on its own.
-    max_bundle_tokens: int = 3000
+    max_bundle_tokens: int = 4000
     # Merge small sections/trailing bundles until they reach this many tokens.
     # Roughly the fixed prompt overhead (system + schema + context), so a
     # bundle can carry at least as much translatable text as scaffolding.
     # 0 disables the merge.
-    min_bundle_tokens: int = 800
+    min_bundle_tokens: int = 1000
 
 
 @dataclass
@@ -202,7 +208,6 @@ def _default_config_dict() -> dict[str, Any]:
             "enable_format_guard": False,
             "fail_on_validation_error": True,
             "review_min_bundle_tokens": 1200,
-            "review_min_segments": 6,
             "review_confidence_threshold": 0.85,
             "review_max_rounds": 2,
             "enable_glossary": True,
@@ -212,13 +217,16 @@ def _default_config_dict() -> dict[str, Any]:
             "enable_anchor_scheduling": True,
             "reviewer_model": "",
             "judge_model": "",
+            "fast_model": "",
+            "quality_model": "",
+            "brief_model": "",
             "enable_context_pull": True,
             "enable_final_edit": True,
             "final_edit_max_segments": 300,
         },
         "segmentation": {
-            "max_bundle_tokens": 3000,
-            "min_bundle_tokens": 800,
+            "max_bundle_tokens": 4000,
+            "min_bundle_tokens": 1000,
         },
         "input": {
             "file_pattern": "*.md",
@@ -250,6 +258,7 @@ def _default_config_dict() -> dict[str, Any]:
             "reuse_min_confidence": 0.3,
             "glossary_persist": True,
             "glossary_path": ".mdtx/glossary.sqlite3",
+            "brief_path": ".mdtx/briefs.sqlite3",
         },
     }
 
@@ -281,19 +290,16 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快；balanced: 默认；strict: 格式更严格。
+  # fast: 省 token/提速；balanced: 默认；quality: 最高质量（strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发agent格式审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
-  # 以下为 balanced 模式下按条件触发审校的阈值。
-  # bundle 估算 token 数达到该值时触发审校（1200 token ≈ 1600 汉字 ≈ 4000 英文字符）。
+  # balanced 模式下，bundle 估算 token 达到该值才进入审校候选（不再按段数触发）。
   review_min_bundle_tokens: 1200
-  # bundle 段落数达到该值时触发审校。
-  review_min_segments: 6
   # 翻译结果置信度低于该值时触发审校。
   review_confidence_threshold: 0.85
   # 每个文本包的 反思->修复 轮数；大于 1 时每轮修复后会对修复过的段落复核一次。
@@ -310,9 +316,14 @@ pipeline:
   # 审校/评审可选用不同模型（留空 = 与翻译同模型），避免自我审校偏好。
   reviewer_model: ""
   judge_model: ""
+  # 分模式模型路由（留空 = provider.model）。
+  fast_model: ""
+  quality_model: ""
+  # 文档 Brief 模型：读全文生成大意/术语/章节摘要（留空 = provider.model）。
+  brief_model: ""
   # 上下文按需拉取：翻译模型可请求对特定段落做更深的翻译记忆检索，随后重译该文本包。
   enable_context_pull: true
-  # 文档级终审（strict 模式）：跨文本包审阅指代/衔接/术语一致性并修正（final_edit 调用）。
+  # 文档级终审（quality 模式）：跨文本包审阅指代/衔接/术语一致性并修正（final_edit 调用）。
   enable_final_edit: true
   # 终审最多覆盖的段落数（控制成本）。
   final_edit_max_segments: 300
@@ -322,12 +333,12 @@ pipeline:
 # 用字符做预算会让中英文的实际风险差 2 倍以上。
 segmentation:
   # 单个文本包的硬上限（估算源 token），也是超长块按行拆分的阈值。
-  # 3000 约为 provider.max_tokens（默认 8000）的 45%：译文 token 数与源文大致相当，
+  # 4000 约为 provider.max_tokens（默认 8000）的 50%：译文 token 数与源文大致相当，
   # 剩下的余量留给 JSON 封套和一次重试。要调大请连同 max_tokens 一起调。
-  max_bundle_tokens: 3000
+  max_bundle_tokens: 4000
   # 小章节/尾包合并到该 token 数为止；0 表示不合并。
   # 约等于每包固定 prompt 开销，保证正文至少和脚手架一样多。
-  min_bundle_tokens: 800
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -379,6 +390,8 @@ memory:
   # 持久化术语表：跨运行累积，人工条目（origin=user）永远优先于模型投票。
   glossary_persist: true
   glossary_path: .mdtx/glossary.sqlite3
+  # 文档 Brief 缓存（跨运行复用 summary/术语）。
+  brief_path: .mdtx/briefs.sqlite3
 """
 
 
@@ -414,6 +427,10 @@ _DEPRECATED_KEYS = {
     ("pipeline", "review_min_bundle_chars"): (
         "budgets are counted in tokens now; rename to review_min_bundle_tokens (1600 chars is "
         "roughly 1200 tokens of Chinese)"
+    ),
+    ("pipeline", "review_min_segments"): (
+        "balanced review is now risk-driven; bundle token size, confidence and sentinel findings "
+        "decide whether a bundle is reviewed"
     ),
 }
 

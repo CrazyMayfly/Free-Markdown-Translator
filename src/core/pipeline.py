@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from src.agents.brief_agent import BriefAgent
 from src.agents.editor_agent import EditorAgent
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.glossary_agent import GlossaryAgent
@@ -14,10 +15,12 @@ from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
 from src.core.errors import OutputWriteError, TranslationPipelineError
 from src.core.glossary import canonical_glossary, detect_glossary_conflicts
+from src.core.modes import normalize_mode, profile_for
 from src.core.orchestrator import Orchestrator
 from src.core.tokens import estimate_tokens
 from src.core.types import (
     ApiUsageSummary,
+    DocumentBrief,
     MemoryStore,
     PipelineResult,
     SegmentBundle,
@@ -56,6 +59,7 @@ class TranslationPipeline:
         glossary_agent: GlossaryAgent | None = None,
         glossary_store=None,
         editor_agent: EditorAgent | None = None,
+        brief_agent: BriefAgent | None = None,
     ) -> None:
         self.config = config
         self.parser = parser
@@ -69,6 +73,7 @@ class TranslationPipeline:
         self.glossary_agent = glossary_agent
         self.glossary_store = glossary_store
         self.editor_agent = editor_agent
+        self.brief_agent = brief_agent
         self.context_builder = DocumentContextBuilder()
         self.orchestrator = Orchestrator()
         self.protected_span_processor = ProtectedSpanProcessor()
@@ -116,6 +121,7 @@ class TranslationPipeline:
         mode = self._normalized_mode()
         self._sentinel_findings = []
         resumed_bundles = self.checkpoint_store.load(input_path, target_lang) if self.checkpoint_store is not None else {}
+        context.brief = await self._build_brief(context, segments, target_lang, source_text)
         context.glossary = await self._build_glossary(context, segments, fingerprint, target_lang, resumed_bundles)
         bundles = self.orchestrator.build_bundles(segments, context, self.config)
         # The bundler may split one oversized block into several segments that
@@ -143,7 +149,7 @@ class TranslationPipeline:
         )
         all_translations = await self._consistency_pass(bundles, all_translations, context, target_lang, fingerprint, style_key, segment_lookup)
         if self._should_run_final_edit() and self.editor_agent is not None:
-            logging.info("Running document-level final edit (strict mode)")
+            logging.info("Running document-level final edit (quality mode)")
             all_translations = await self.editor_agent.edit_document_async(
                 segments,
                 all_translations,
@@ -206,6 +212,9 @@ class TranslationPipeline:
         if reviewer_provider is not None and reviewer_provider is not provider:
             # Review may run on a dedicated model; its tokens belong in the bill.
             usage.merge(reviewer_provider.get_usage_summary())
+        brief_provider = self.brief_agent.provider if self.brief_agent is not None else None
+        if brief_provider is not None and brief_provider is not provider and brief_provider is not reviewer_provider:
+            usage.merge(brief_provider.get_usage_summary())
         result = PipelineResult(
             input_path=input_path,
             output_path=final_output_path if write_output else None,
@@ -275,14 +284,11 @@ class TranslationPipeline:
         return target_lang.split("-")[0].split("_")[0].lower()
 
     def _normalized_mode(self) -> str:
-        mode = (self.config.pipeline.mode or "balanced").strip().lower()
-        if mode not in {"fast", "balanced", "strict"}:
-            return "balanced"
-        return mode
+        return normalize_mode(self.config.pipeline.mode)
 
     def _review_min_severity(self) -> str:
         mode = self._normalized_mode()
-        if mode == "strict":
+        if mode == "quality":
             return "low"
         if mode == "fast":
             return "high"
@@ -291,35 +297,29 @@ class TranslationPipeline:
         return "medium"
 
     def _should_run_review(self, bundle, translations: list[TranslationResult]) -> bool:
-        if self.config.pipeline.enable_review:
-            return True
-
         mode = self._normalized_mode()
         if mode == "fast":
             return False
-        if mode == "strict":
+        if self.config.pipeline.enable_review:
+            return True
+        if mode == "quality":
             return True
 
         bundle_tokens = sum(estimate_tokens(segment.source_text) for segment in bundle.segments)
         low_confidence = any(item.confidence < self.config.pipeline.review_confidence_threshold for item in translations)
         has_notes = any(item.notes for item in translations)
-        return (
-            len(bundle.segments) >= self.config.pipeline.review_min_segments
-            or bundle_tokens >= self.config.pipeline.review_min_bundle_tokens
-            or low_confidence
-            or has_notes
-        )
+        return bundle_tokens >= self.config.pipeline.review_min_bundle_tokens or low_confidence or has_notes
 
     def _should_run_format_guard(self, validation) -> bool:
         if self.config.pipeline.enable_format_guard:
             return True
-        return self._normalized_mode() in {"balanced", "strict"} and not validation.passed
+        return self._normalized_mode() in {"balanced", "quality"} and not validation.passed
 
     def _should_run_final_edit(self) -> bool:
         return (
             self.editor_agent is not None
             and self.config.pipeline.enable_final_edit
-            and self._normalized_mode() == "strict"
+            and self._normalized_mode() == "quality"
         )
 
     def _render_and_validate(self, parsed, segments, translations):
@@ -344,34 +344,54 @@ class TranslationPipeline:
             logging.warning("Validation: %s errors, %s warnings", len(validation.errors), len(validation.warnings))
         return output_text, validation, translations
 
+    async def _build_brief(self, context, segments, target_lang: str, source_text: str = "") -> DocumentBrief:
+        if self.brief_agent is None:
+            return DocumentBrief()
+        try:
+            brief = await self.brief_agent.generate_async(
+                context,
+                segments,
+                target_lang,
+                mode=self._normalized_mode(),
+                source_text=source_text,
+            )
+        except Exception as exc:
+            logging.warning("Document brief failed (%s); using deterministic context", exc)
+            return DocumentBrief()
+        if not self.config.pipeline.enable_glossary:
+            brief.glossary = {}
+        return brief
+
     async def _build_glossary(self, context, segments, fingerprint: str, target_lang: str, resumed_bundles: dict) -> dict[str, str]:
         """Authoritative term -> rendering glossary shared by all bundles.
 
         Precedence: persisted user entries > preserve_terms (config) >
-        persisted model entries > freshly extracted terms. Extracted terms are
-        written back so the glossary accumulates across runs.
+        persisted model entries > brief terms > legacy sampler terms.
+        The Brief pass already read the whole document, so the legacy sampler
+        only runs as a fallback (or when the brief produced no terms).
         """
-        if self.glossary_agent is None or not self.config.pipeline.enable_glossary:
-            return {}
-        if self._normalized_mode() == "fast":
-            return {}
-        min_confidence = self.config.memory.reuse_min_confidence
-        resumed_ids = {item.segment_id for items in resumed_bundles.values() for item in items}
-        pending = [
-            segment
-            for segment in segments
-            if segment.segment_id not in resumed_ids
-            and self.memory.peek(segment.source_text, target_lang, fingerprint, min_confidence) is None
-        ]
-        if not pending:
-            # Everything comes from memory or a checkpoint: reuse must stay free.
-            return {}
-        sample_text = " ".join(segment.source_text for segment in pending[:8])
-        try:
-            extracted = await self.glossary_agent.extract_async(context, sample_text, target_lang)
-        except Exception as exc:
-            logging.warning("Glossary extraction failed (%s); continuing without it", exc)
-            extracted = {}
+        if not self.config.pipeline.enable_glossary:
+            return {term: term for term in self.config.style.preserve_terms}
+
+        brief = getattr(context, "brief", None)
+        extracted: dict[str, str] = dict(brief.glossary) if brief is not None else {}
+        if not extracted and self._normalized_mode() != "fast" and self.glossary_agent is not None:
+            min_confidence = self.config.memory.reuse_min_confidence
+            resumed_ids = {item.segment_id for items in resumed_bundles.values() for item in items}
+            pending = [
+                segment
+                for segment in segments
+                if segment.segment_id not in resumed_ids
+                and self.memory.peek(segment.source_text, target_lang, fingerprint, min_confidence) is None
+            ]
+            if pending:
+                sample_text = " ".join(segment.source_text for segment in pending[:8])
+                try:
+                    extracted = await self.glossary_agent.extract_async(context, sample_text, target_lang)
+                except Exception as exc:
+                    logging.warning("Glossary extraction failed (%s); continuing without it", exc)
+                    extracted = {}
+
         if self.glossary_store is not None:
             for term, rendering in extracted.items():
                 self.glossary_store.upsert(target_lang, term, rendering, origin="model")
@@ -382,7 +402,7 @@ class TranslationPipeline:
         for term, rendering in extracted.items():
             glossary.setdefault(term, rendering)
         if glossary:
-            logging.info("Glossary: %s term(s)", len(glossary))
+            logging.info("Glossary: %s term(s)%s", len(glossary), " (brief)" if brief and brief.glossary else "")
         return glossary
 
     async def _consistency_pass(
@@ -619,12 +639,12 @@ class TranslationPipeline:
                 similar_examples=similar_examples,
                 anchor_translations=bundle.anchor_translations,
             )
-            outcome = await self._translate_with_retry(pending_bundle, context, target_lang)
+            outcome = await self._translate_with_retry(pending_bundle, context, target_lang, mode)
             if outcome.context_requests and self.config.pipeline.enable_context_pull and mode != "fast":
                 enriched = self._apply_context_requests(pending_bundle, outcome.context_requests, target_lang, style_key)
                 if enriched is not None:
                     logging.info("Context pull: %s request(s) in %s; re-translating with deeper context", len(outcome.context_requests), bundle.bundle_id)
-                    outcome = await self._translate_with_retry(enriched, context, target_lang)
+                    outcome = await self._translate_with_retry(enriched, context, target_lang, mode)
             translations = outcome.translations
 
         merged: dict[str, TranslationResult] = {item.segment_id: item for item in (translations or [])}
@@ -669,11 +689,26 @@ class TranslationPipeline:
                         item.notes.append(note)
 
         if self._should_run_review(bundle, ordered) or (sentinel_findings and mode != "fast"):
+            profile = profile_for(mode)
+            scope_ids: set[str] | None = None
+            if profile.review == "targeted":
+                # Review the suspicious segments first; only a bundle that
+                # crosses the token threshold without any specific finding
+                # falls back to a whole-bundle review.
+                suspicious = {finding.segment_id for finding in sentinel_findings}
+                suspicious.update(
+                    item.segment_id
+                    for item in ordered
+                    if item.confidence < self.config.pipeline.review_confidence_threshold or item.notes
+                )
+                if suspicious:
+                    scope_ids = suspicious
             logging.info(
-                "Reviewing %s (%s%s)",
+                "Reviewing %s (%s%s%s)",
                 bundle.bundle_id,
                 mode,
                 f", {len(sentinel_findings)} sentinel finding(s)" if sentinel_findings else "",
+                f", scope={len(scope_ids)}" if scope_ids else "",
             )
             ordered = await self.reviewer_agent.review_bundle_async(
                 bundle,
@@ -681,6 +716,7 @@ class TranslationPipeline:
                 context,
                 min_severity=self._review_min_severity(),
                 max_rounds=self.config.pipeline.review_max_rounds,
+                scope_ids=scope_ids,
             )
 
         for item in ordered:
@@ -739,7 +775,7 @@ class TranslationPipeline:
             anchor_translations=bundle.anchor_translations,
         )
 
-    async def _translate_with_retry(self, bundle, context, target_lang: str) -> TranslationOutcome:
+    async def _translate_with_retry(self, bundle, context, target_lang: str, mode: str = "balanced") -> TranslationOutcome:
         last_exc: Exception | None = None
         max_attempts = 5  # Retry budget for LLM output format issues.
         for attempt in range(1, max_attempts + 1):
@@ -748,6 +784,7 @@ class TranslationPipeline:
                     bundle=bundle,
                     context=context,
                     target_lang=target_lang,
+                    mode=mode,
                 )
             except Exception as exc:
                 last_exc = exc

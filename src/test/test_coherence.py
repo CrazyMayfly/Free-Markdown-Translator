@@ -23,7 +23,7 @@ from src.memory.translation_memory import TranslationMemory
 from src.parser.anchor_rewriter import heading_pairs, rewrite_anchors, slugify
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
-from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent
+from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent, _payload_segments
 from src.validators.markdown_validator import MarkdownValidator
 
 
@@ -327,11 +327,13 @@ class PromptCoherenceTests(unittest.TestCase):
         )
 
     def test_translator_prompt_carries_outline_and_glossary(self) -> None:
-        bundle = SegmentBundle(bundle_id="b", segments=[], summary_before="", summary_after="", style_instructions=[])
-        _, user_prompt = build_translator_prompts(bundle, self._context(), "zh-CN")
+        segments = [_segment("s0", "paragraph", "The agent runtime.", 0, 0)]
+        bundle = SegmentBundle(bundle_id="b", segments=segments, summary_before="", summary_after="", style_instructions=[])
+        _, user_prompt = build_translator_prompts(bundle, self._context(), "zh-CN", mode="quality")
         payload = json.loads(user_prompt)
-        self.assertEqual(payload["ctx"]["heading_outline"], ["Introduction", "Advanced Usage"])
-        self.assertEqual(payload["ctx"]["glossary"], {"agent": "智能体"})
+        self.assertEqual(payload["outline"], ["Introduction", "Advanced Usage"])
+        self.assertEqual(payload["brief"]["g"], [["agent", "智能体"]])
+        self.assertEqual(payload["guide"], ["Tone: technical"])
 
     def test_improve_prompt_carries_neighbour_context(self) -> None:
         segments = [
@@ -360,8 +362,9 @@ class PromptCoherenceTests(unittest.TestCase):
         _, user_prompt = build_translator_prompts(bundle, self._context(), "zh-CN")
         payload = json.loads(user_prompt)
         self.assertEqual(list(payload["blocks"].values()), [block])
-        self.assertEqual(payload["segments"][0]["context_after"], ["b0"])
-        self.assertEqual(payload["segments"][1]["context_before"], ["b0"])
+        segments_payload = payload["sections"][0]["segs"]
+        self.assertEqual(segments_payload[0][2], "b0")
+        self.assertEqual(segments_payload[1][2], "b0")
 
     def test_glossary_prompt_shape(self) -> None:
         system_prompt, user_prompt = build_glossary_prompts(self._context(), "sample text about agents", "zh-CN")
@@ -380,16 +383,17 @@ class DriftProvider(FakeProvider):
             self.schemas.append(response_schema)
             self.calls.append(call_label)
             return {
-                "translations": [
+                "t": [
                     {
-                        "segment_id": segment["segment_id"],
-                        "translated_text": f"[ZH]{segment['text']}",
-                        "notes": [],
-                        "applied_terms": {"agent": "智A" if index % 2 == 0 else "智B"},
-                        "confidence": 0.99,
+                        "i": segment_id,
+                        "x": f"[ZH]{text}",
+                        "c": 0.99,
+                        "a": {"agent": "智A" if index % 2 == 0 else "智B"},
+                        "n": [],
                     }
-                    for index, segment in enumerate(payload["segments"])
-                ]
+                    for index, (segment_id, text) in enumerate(_payload_segments(payload))
+                ],
+                "q": [],
             }
         return super().chat_json(system_prompt, user_prompt, call_label, response_schema)
 

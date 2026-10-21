@@ -38,6 +38,20 @@ Paragraph with `code` and [link](https://example.com).
 """
 
 
+
+
+def _payload_segments(payload: dict) -> list[tuple[str, str]]:
+    """Read segments from either the compact translate payload or the legacy shape."""
+    if "segs" in payload:
+        return [(str(item[0]), str(item[1])) for item in payload["segs"]]
+    if "sections" in payload:
+        return [
+            (str(item[0]), str(item[1]))
+            for section in payload["sections"]
+            for item in section.get("segs", [])
+        ]
+    return [(str(item["segment_id"]), str(item["text"])) for item in payload.get("segments", [])]
+
 class FakeProvider(LLMProvider):
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -65,17 +79,20 @@ class FakeProvider(LLMProvider):
         self.calls.append(call_label)
         if task == "translate":
             return {
-                "translations": [
+                "t": [
                     {
-                        "segment_id": segment["segment_id"],
-                        "translated_text": f"[ZH]{segment['text']}",
-                        "notes": [],
-                        "applied_terms": {},
-                        "confidence": 0.99,
+                        "i": segment_id,
+                        "x": f"[ZH]{text}",
+                        "c": 0.99,
+                        "a": {},
+                        "n": [],
                     }
-                    for segment in payload["segments"]
-                ]
+                    for segment_id, text in _payload_segments(payload)
+                ],
+                "q": [],
             }
+        if task == "brief":
+            return {"s": "Fake brief", "tone": "technical", "aud": "developers", "g": [], "sec": []}
         if task == "reflect":
             return {"issues": []}
         if task == "glossary":

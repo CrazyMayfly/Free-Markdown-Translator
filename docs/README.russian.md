@@ -92,7 +92,7 @@ python src/cli/main.py README.md --to english,japanese
 Включить более строгий процесс перевода и проверки: потребляет больше токенов и занимает больше времени, но обеспечивает лучшее качество перевода:
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 Принудительно включить проверку и защиту формата:
@@ -150,19 +150,19 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
 # 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -227,7 +227,7 @@ provider:
 3. `DocumentContextBuilder` Генерируется сводка документа, ограничения стиля, контекст терминологии
 4. `Orchestrator` Сегменты организуются в несколько пакетов (bundles) согласно конфигурации, контролируется размер каждого вызова модели
 5. `TranslatorAgent` Переводится каждый пакет (bundle)
-6. `ReviewerAgent` выполняет условную проверку в режиме `balanced` / `strict`
+6. `ReviewerAgent` выполняет условную проверку в режиме `balanced` / `quality`
 7. `MarkdownRenderer` сопоставляет результаты перевода обратно с AST и рендерит их в Markdown
 8. `MarkdownValidator` валидирует front matter и общую структуру
 9. Если валидация не удалась, `FormatGuardAgent` при необходимости попытается исправить проблемы форматирования

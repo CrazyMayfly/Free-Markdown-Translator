@@ -16,7 +16,7 @@ from src.infra.config import TranslatorConfig
 from src.memory.translation_memory import TranslationMemory
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
-from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent
+from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent, _payload_segments
 from src.validators.markdown_validator import MarkdownValidator
 
 _STORED_PARAGRAPH = "Rotate the signing keys for the staging cluster every 30 days."
@@ -65,26 +65,29 @@ class ContextPullProvider(FakeProvider):
             self.schemas.append(response_schema)
             self.calls.append(call_label)
             self.payloads.append(payload)
+            segments = _payload_segments(payload)
             translations = [
-                {
-                    "segment_id": segment["segment_id"],
-                    "translated_text": f"[ZH]{segment['text']}",
-                    "notes": [],
-                    "applied_terms": {},
-                    "confidence": 0.99,
-                }
-                for segment in payload["segments"]
+                {"i": segment_id, "x": f"[ZH]{text}", "c": 0.99, "a": {}, "n": []}
+                for segment_id, text in segments
             ]
             if not self.requested:
                 self.requested = True
-                paragraph = next(segment for segment in payload["segments"] if segment["segment_id"].startswith("body-") and "Rotate" in segment["text"])
+                paragraph = next(
+                    (segment_id, text)
+                    for segment_id, text in segments
+                    if segment_id.startswith("body-") and "Rotate" in text
+                )
                 return {
-                    "translations": translations,
-                    "context_requests": [
-                        {"segment_id": paragraph["segment_id"], "need": "similar_translations", "reason": "unsure how this operation was rendered before"}
+                    "t": translations,
+                    "q": [
+                        {
+                            "i": paragraph[0],
+                            "need": "similar_translations",
+                            "why": "unsure how this operation was rendered before",
+                        }
                     ],
                 }
-            return {"translations": translations, "context_requests": []}
+            return {"t": translations, "q": []}
         return super().chat_json(system_prompt, user_prompt, call_label, response_schema)
 
 
@@ -102,13 +105,12 @@ class ContextPullTests(unittest.TestCase):
             _pipeline(provider, _config(), memory=memory).run(target, "zh-CN", write_output=False)
 
         self.assertEqual(provider.calls.count("translate"), 2)
-        first_paragraph = next(segment for segment in provider.payloads[0]["segments"] if "Rotate" in segment["text"])
-        second_paragraph = next(segment for segment in provider.payloads[1]["segments"] if segment["segment_id"] == first_paragraph["segment_id"])
+        first_id, _ = next(pair for pair in _payload_segments(provider.payloads[0]) if "Rotate" in pair[1])
         # 0.65 similarity is below the auto example threshold: round 1 had no
         # example, the pull round got the deep-search hit.
-        self.assertNotIn("similar", first_paragraph)
-        self.assertIn("similar", second_paragraph)
-        self.assertIn("staging cluster", second_paragraph["similar"][0]["source"])
+        self.assertNotIn("similar", provider.payloads[0])
+        self.assertIn(first_id, provider.payloads[1]["similar"])
+        self.assertIn("staging cluster", provider.payloads[1]["similar"][first_id][0][0])
 
     def test_pull_disabled_sticks_to_one_round(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -186,7 +188,7 @@ class FinalEditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "doc.md"
             input_path.write_text(SAMPLE_MARKDOWN, encoding="utf-8")
-            result = _pipeline(provider, _config(mode="strict"), editor=EditorAgent(provider)).run(input_path, "zh-CN", write_output=False)
+            result = _pipeline(provider, _config(mode="quality"), editor=EditorAgent(provider)).run(input_path, "zh-CN", write_output=False)
 
         self.assertEqual(provider.calls.count("final_edit"), 1)
         self.assertEqual(provider.calls.count("final_edit_improve"), 1)

@@ -92,7 +92,7 @@ Increase parallelism to speed up bulk translation:
 Enable a stricter translation and verification process, consuming more tokens and taking more time but yielding better translation results:
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 Force enable proofreading and format protection:
@@ -147,18 +147,18 @@ provider:
   max_tokens: 8000
 # Translation pipeline control.
 pipeline:
-  # fast: Faster (without review and guard); balanced: Default (triggers review and guard based on conditions); strict: Stricter (executes review and guard).
+  # fast: Lowest token/latency (no LLM review/edit); balanced: default (reviews suspicious bundles only); quality: highest quality (full review + final edit; strict is an alias).
   mode: balanced
-  # Force enable Review Agent. When disabled, balanced/strict may still trigger review based on conditions.
+  # Force enable Review Agent. When disabled, balanced reviews suspicious bundles only and quality reviews all bundles.
   enable_review: false
-  # Force enable Format Guard Agent. When disabled, balanced/strict may still trigger repair upon validation failure.
+  # Force enable Format Guard Agent. When disabled, balanced/quality may still trigger repair upon validation failure.
   enable_format_guard: false
   # Whether to report an error directly when output validation fails.
   fail_on_validation_error: true
 # Segmentation strategy. Packs along Markdown structure (headings/lists/tables/quotes), then splits oversized blocks by line.
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 # Input rules.
 input:
   # When a directory is passed, recursively match files that need translation.
@@ -220,7 +220,7 @@ This project does not 'feed the entire Markdown document to the model for transl
 3. `DocumentContextBuilder` Generate document summary, style constraints, and terminology context
 4. `Orchestrator` Organize segments into multiple bundles based on configuration, controlling the size of each model call
 5. `TranslatorAgent` Translate each bundle
-6. `ReviewerAgent` conditionally reviews in `balanced` / `strict` mode
+6. `ReviewerAgent` conditionally reviews in `balanced` / `quality` mode
 7. `MarkdownRenderer` maps the translation results back to the AST and renders them as Markdown
 8. `MarkdownValidator` validates the front matter and overall structure
 9. If validation fails, `FormatGuardAgent` will attempt to fix formatting issues when necessary

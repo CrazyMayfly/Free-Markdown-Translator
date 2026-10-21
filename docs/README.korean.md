@@ -92,7 +92,7 @@ Windows 를 사용하는 경우, 이미 패키징된 `mdtx.exe` 를 다운로드
 더 엄격한 번역 및 검증 프로세스를 활성화합니다. 더 많은 토큰을 소비하고 시간이 더 소요되지만 더 나은 번역 결과를 얻습니다:
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 검수 및 형식 보호를 강제로 활성화합니다:
@@ -150,19 +150,19 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
 # 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -227,7 +227,7 @@ provider:
 3. `DocumentContextBuilder` 문서 요약, 스타일 제약, 용어 컨텍스트 생성
 4. `Orchestrator` 설정에 따라 segment 를 여러 bundle 로 구성하여 각 모델 호출의 크기 제어
 5. `TranslatorAgent` 각 bundle 에 대해 번역 수행
-6. `ReviewerAgent` 는 `balanced` / `strict` 모드에서 조건부 검토를 수행합니다
+6. `ReviewerAgent` 는 `balanced` / `quality` 모드에서 조건부 검토를 수행합니다
 7. `MarkdownRenderer` 는 번역 결과를 AST 로 다시 매핑하고 Markdown 으로 렌더링합니다
 8. `MarkdownValidator` 는 front matter 와 전체 구조를 검증합니다
 9. 검증에 실패할 경우 `FormatGuardAgent` 는 필요시 형식 문제를 수정하려고 시도합니다

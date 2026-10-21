@@ -23,11 +23,15 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 可选模型路由（留空 = provider.model）。
+  fast_model: ""
+  quality_model: ""
+  brief_model: ""
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
@@ -36,9 +40,9 @@ pipeline:
 # 预算单位是估算 token 而非字符：同样 6000 字符，中文约 4200 token、英文约 1800 token。
 segmentation:
   # 单个文本包的硬上限（估算源 token），也是超长块按行拆分的阈值。
-  max_bundle_tokens: 3000
+  max_bundle_tokens: 4000
   # 小章节/尾包合并到该 token 数为止；0 表示不合并。
-  min_bundle_tokens: 800
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:

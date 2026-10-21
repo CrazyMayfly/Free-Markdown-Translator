@@ -154,6 +154,21 @@ class ValidationReport:
 
 
 @dataclass
+class DocumentBrief:
+    """One model-generated document brief reused by every bundle.
+
+    Built once per document (optionally by a cheaper model) so the static
+    context is consistent and no longer re-derived per bundle.
+    """
+
+    summary: str = ""
+    tone: str = ""
+    audience: str = ""
+    glossary: dict[str, str] = field(default_factory=dict)
+    section_summaries: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class DocumentContext:
     title: str
     abstract: str
@@ -164,6 +179,7 @@ class DocumentContext:
     # the authoritative term -> rendering glossary for this run.
     heading_outline: list[str] = field(default_factory=list)
     glossary: dict[str, str] = field(default_factory=dict)
+    brief: DocumentBrief = field(default_factory=DocumentBrief)
 
 
 @dataclass

@@ -25,7 +25,7 @@ from src.memory.glossary_store import GlossaryStore
 from src.memory.translation_memory import TranslationMemory, similarity
 from src.parser.markdown_parser import MarkdownParser
 from src.parser.segment_extractor import SegmentExtractor
-from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent
+from src.test.test_ast_pipeline import SAMPLE_MARKDOWN, FakeProvider, FormatGuardAgent, _payload_segments
 from src.validators.markdown_validator import MarkdownValidator
 from src.validators.semantic_sentinel import run_sentinels
 
@@ -145,10 +145,10 @@ class FuzzyMemoryTests(unittest.TestCase):
             _pipeline(second, _config(), memory=memory).run(related, "zh-CN", write_output=False)
 
             self.assertEqual(second.calls.count("translate"), 1)
-            paragraph_payload = second.translate_payloads[0]["segments"][1]
-            self.assertIn("similar", paragraph_payload)
-            self.assertTrue(paragraph_payload["similar"])
-            self.assertIn("production", paragraph_payload["similar"][0]["source"])
+            payload = second.translate_payloads[0]
+            self.assertIn("similar", payload)
+            self.assertTrue(payload["similar"])
+            self.assertTrue(any("production" in item[0] for examples in payload["similar"].values() for item in examples))
 
 
 class GlossaryStoreTests(unittest.TestCase):
@@ -244,16 +244,17 @@ class SentinelTests(unittest.TestCase):
                 if payload["task"] == "translate":
                     self.calls.append(call_label)
                     return {
-                        "translations": [
+                        "t": [
                             {
-                                "segment_id": segment["segment_id"],
-                                "translated_text": "翻译丢失了数字" if "30" in segment["text"] else f"[ZH]{segment['text']}",
-                                "notes": [],
-                                "applied_terms": {},
-                                "confidence": 0.99,
+                                "i": segment_id,
+                                "x": "翻译丢失了数字" if "30" in text else f"[ZH]{text}",
+                                "c": 0.99,
+                                "a": {},
+                                "n": [],
                             }
-                            for segment in payload["segments"]
-                        ]
+                            for segment_id, text in _payload_segments(payload)
+                        ],
+                        "q": [],
                     }
                 return super().chat_json(system_prompt, user_prompt, call_label, response_schema)
 
@@ -346,11 +347,11 @@ class AnchorSchedulingTests(unittest.TestCase):
             _pipeline(provider, config).run(input_path, "zh-CN", write_output=False)
 
         self.assertGreaterEqual(len(provider.translate_payloads), 3)
-        anchorless = [payload for payload in provider.translate_payloads if "anchor_translations" in payload]
+        anchorless = [payload for payload in provider.translate_payloads if "anchor" in payload]
         self.assertTrue(anchorless, "at least one non-anchor bundle should carry anchor context")
-        anchors = anchorless[0]["anchor_translations"]
+        anchors = anchorless[0]["anchor"]
         self.assertTrue(anchors)
-        self.assertTrue(any("[ZH]" in entry["text"] for entry in anchors))
+        self.assertTrue(any("[ZH]" in entry[1] for entry in anchors))
 
     def test_anchor_scheduling_disabled_keeps_prompt_without_anchor(self) -> None:
         section_a = " ".join(f"Alpha paragraph number {i} with body text." for i in range(30))
@@ -366,7 +367,7 @@ class AnchorSchedulingTests(unittest.TestCase):
             input_path.write_text(markdown, encoding="utf-8")
             _pipeline(provider, config).run(input_path, "zh-CN", write_output=False)
 
-        self.assertTrue(all("anchor_translations" not in payload for payload in provider.translate_payloads))
+        self.assertTrue(all("anchor" not in payload for payload in provider.translate_payloads))
 
 
 class ModelRoutingTests(unittest.TestCase):

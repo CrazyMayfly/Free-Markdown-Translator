@@ -92,7 +92,7 @@ python src/cli/main.py README.md --to english,japanese
 सख्त अनुवाद और सत्यापन प्रक्रिया सक्षम करें, अधिक टोकन खपत होती है, अधिक समय लगता है लेकिन बेहतर अनुवाद परिणाम मिलते हैं:
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 प्रूफरीडिंग और प्रारूप सुरक्षा को बलपूर्वक सक्षम करें:
@@ -150,19 +150,19 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
 # 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -227,7 +227,7 @@ provider:
 3. `DocumentContextBuilder` दस्तावेज़ सारांश, शैली बाधाएं, शब्दावली संदर्भ उत्पन्न करें
 4. `Orchestrator` कॉन्फ़िगरेशन के अनुसार segment को कई bundle में व्यवस्थित करें, प्रत्येक मॉडल कॉल के आकार को नियंत्रित करें
 5. `TranslatorAgent` प्रत्येक bundle का अनुवाद करें
-6. `ReviewerAgent` `balanced` / `strict` मोड में शर्तों के आधार पर समीक्षा करता है
+6. `ReviewerAgent` `balanced` / `quality` मोड में शर्तों के आधार पर समीक्षा करता है
 7. `MarkdownRenderer` अनुवाद परिणामों को वापस AST में मैप करता है और Markdown के रूप में रेंडर करता है
 8. `MarkdownValidator` front matter और समग्र संरचना को सत्यापित करता है
 9. यदि सत्यापन विफल होता है, तो `FormatGuardAgent` आवश्यकता पड़ने पर प्रारूप समस्याओं को ठीक करने का प्रयास करता है

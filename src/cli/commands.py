@@ -11,18 +11,21 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from src.agents.brief_agent import BriefAgent
 from src.agents.editor_agent import EditorAgent
 from src.agents.format_guard_agent import FormatGuardAgent
 from src.agents.glossary_agent import GlossaryAgent
 from src.agents.judge_agent import JudgeAgent, apply_judge_feedback
 from src.agents.reviewer_agent import ReviewerAgent
 from src.agents.translator_agent import TranslatorAgent
+from src.core.modes import normalize_mode
 from src.core.orchestrator import Orchestrator
 from src.core.pipeline import TranslationPipeline
 from src.core.types import ApiUsageSummary, MemoryStore
 from src.infra.config import TranslatorConfig
 from src.infra.logging import log_success, log_task_context
 from src.llm.client import AsyncOpenAIProvider
+from src.memory.brief_cache import build_brief_cache
 from src.memory.checkpoint import JobCheckpointStore
 from src.memory.document_context import DocumentContextBuilder
 from src.memory.glossary_store import build_glossary_store
@@ -57,25 +60,38 @@ def _build_provider(config: TranslatorConfig, model: str | None = None):
 
 
 def build_pipeline(config: TranslatorConfig, memory: MemoryStore | None = None, checkpoint_store: JobCheckpointStore | None = None) -> TranslationPipeline:
-    provider = _build_provider(config)
+    mode = normalize_mode(config.pipeline.mode)
+    translator_model = config.provider.model
+    if mode == "fast" and config.pipeline.fast_model:
+        translator_model = config.pipeline.fast_model
+    elif mode == "quality" and config.pipeline.quality_model:
+        translator_model = config.pipeline.quality_model
+    provider = _build_provider(config, translator_model if translator_model != config.provider.model else None)
     reviewer_provider = provider
     if config.pipeline.reviewer_model:
         # A dedicated review model breaks the same-model self-review bias;
         # the document-level editor rides on the same selection.
         reviewer_provider = _build_provider(config, config.pipeline.reviewer_model)
+    brief_provider = provider
+    if config.pipeline.brief_model:
+        brief_provider = _build_provider(config, config.pipeline.brief_model)
+    brief_cache = build_brief_cache(config)
     return TranslationPipeline(
         config=config,
         parser=MarkdownParser(),
         extractor=SegmentExtractor(),
         translator_agent=TranslatorAgent(provider),
-        reviewer_agent=ReviewerAgent(reviewer_provider if config.pipeline.enable_review else None),
-        format_guard_agent=FormatGuardAgent(provider if config.pipeline.enable_format_guard else None),
+        # Mode gating decides whether these agents run; they need a provider
+        # so quality/targeted review and validation-failure repair actually work.
+        reviewer_agent=ReviewerAgent(reviewer_provider),
+        format_guard_agent=FormatGuardAgent(provider),
         validator=MarkdownValidator(),
         memory=memory,
         checkpoint_store=checkpoint_store,
         glossary_agent=GlossaryAgent(provider),
         glossary_store=build_glossary_store(config),
         editor_agent=EditorAgent(reviewer_provider),
+        brief_agent=BriefAgent(brief_provider, cache=brief_cache),
     )
 
 

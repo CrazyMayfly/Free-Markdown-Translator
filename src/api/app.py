@@ -73,6 +73,9 @@ def _mask_config(config: TranslatorConfig) -> dict[str, Any]:
             "final_edit_max_segments": config.pipeline.final_edit_max_segments,
             "reviewer_model": config.pipeline.reviewer_model,
             "judge_model": config.pipeline.judge_model,
+            "fast_model": config.pipeline.fast_model,
+            "quality_model": config.pipeline.quality_model,
+            "brief_model": config.pipeline.brief_model,
         },
         "segmentation": {
             "max_bundle_tokens": config.segmentation.max_bundle_tokens,
@@ -99,6 +102,7 @@ def _mask_config(config: TranslatorConfig) -> dict[str, Any]:
             "reuse_min_confidence": config.memory.reuse_min_confidence,
             "glossary_persist": config.memory.glossary_persist,
             "glossary_path": config.memory.glossary_path,
+            "brief_path": config.memory.brief_path,
         },
     }
     return data

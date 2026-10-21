@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, replace
 
+from src.core.modes import profile_for
 from src.core.tokens import estimate_tokens, prefix_costs
 from src.core.types import DocumentContext, Segment, SegmentBundle
 from src.infra.config import TranslatorConfig
@@ -47,8 +48,9 @@ class Orchestrator:
 
     def build_bundles(self, segments: list[Segment], context: DocumentContext, config: TranslatorConfig) -> list[SegmentBundle]:
         sections = self._build_sections(segments)
-        max_tokens = max(1, config.segmentation.max_bundle_tokens)
-        min_tokens = max(0, config.segmentation.min_bundle_tokens)
+        profile = profile_for(config.pipeline.mode)
+        max_tokens = max(1, int(config.segmentation.max_bundle_tokens * profile.bundle_scale))
+        min_tokens = max(0, int(config.segmentation.min_bundle_tokens * profile.min_bundle_scale))
         packed = self._pack_sections(sections, max_tokens, min_tokens)
         self._merge_small_trailing(packed, min_tokens, max_tokens)
         return self._build_bundles(packed, context)

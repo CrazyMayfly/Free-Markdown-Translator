@@ -30,12 +30,12 @@ class ReviewerAgent:
         context: DocumentContext,
         min_severity: str = "high",
         max_rounds: int = 1,
+        scope_ids: set[str] | None = None,
     ) -> list[TranslationResult]:
         provider = self.provider
         if provider is None:
             return translations
         current = list(translations)
-        scope_ids: set[str] | None = None
         for _round in range(max(1, max_rounds)):
             round_bundle, round_translations = self._restrict(bundle, current, scope_ids)
             if not round_bundle.segments:
@@ -62,11 +62,11 @@ class ReviewerAgent:
         context: DocumentContext,
         min_severity: str = "high",
         max_rounds: int = 1,
+        scope_ids: set[str] | None = None,
     ) -> list[TranslationResult]:
         if self.provider is None:
             return translations
         current = list(translations)
-        scope_ids: set[str] | None = None
         for _round in range(max(1, max_rounds)):
             round_bundle, round_translations = self._restrict(bundle, current, scope_ids)
             if not round_bundle.segments:

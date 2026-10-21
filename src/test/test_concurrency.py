@@ -24,7 +24,7 @@ from src.validators.markdown_validator import MarkdownValidator
 
 # Sections are structural bundle boundaries; the test config caps each section
 # at 600 chars so N sections produce N bundles (the small H1 merges forward).
-# Bundles stay under review_min_segments (6) so only "translate" fires.
+# Bundles stay under the configured token thresholds so only "translate" fires.
 _FILLER = (
     "This paragraph deliberately runs long enough to exercise bundle packing "
     "without crossing the per-bundle character cap used by these tests. "

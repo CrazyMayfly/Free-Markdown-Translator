@@ -96,7 +96,9 @@ class JobCheckpointStore:
         # not be resumed against newly built bundles. The estimator version is
         # included because the same budget maps to different text when the
         # estimator weights change.
-        raw = f"{model}\x00{tone}\x00{audience}\x00{mode}"
+        from src.core.modes import normalize_mode
+
+        raw = f"{model}\x00{tone}\x00{audience}\x00{normalize_mode(mode)}"
         if max_bundle_tokens is not None:
             raw += (
                 f"\x00seg\x00{cls.SEGMENTATION_VERSION}\x00{TOKEN_ESTIMATOR_VERSION}"

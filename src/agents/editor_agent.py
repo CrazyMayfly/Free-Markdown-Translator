@@ -10,7 +10,7 @@ from src.llm.schemas import REFLECTION_RESPONSE_SCHEMA, TRANSLATION_RESPONSE_SCH
 
 
 class EditorAgent:
-    """Document-level final edit pass (strict mode).
+    """Document-level final edit pass (quality mode).
 
     Reviews the complete ordered segment list for defects that only appear
     across bundles — broken cross-references, terminology or tone drift

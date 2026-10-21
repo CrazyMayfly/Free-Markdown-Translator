@@ -92,7 +92,7 @@ Parallelität erhöhen, um Massentranslationen zu beschleunigen:
 Strengere Übersetzungs- und Validierungsprozesse aktivieren: Mehr Tokenverbrauch und Laufzeit, dafür bessere Ergebnisse:
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 Überprüfung und Formatschutz erzwingen:
@@ -150,19 +150,19 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
 # 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -227,7 +227,7 @@ Dieses Projekt ist kein Ansatz, bei dem das gesamte Markdown-Dokument auf einmal
 3. `DocumentContextBuilder` Generieren Sie Dokumentzusammenfassungen, Stilbeschränkungen und Terminologiekontext.
 4. `Orchestrator` Organisieren Sie Segmente gemäß der Konfiguration in mehrere Bundles und steuern Sie die Größe jedes Modellaufrufs.
 5. `TranslatorAgent` Übersetzen Sie jedes Bundle.
-6. `ReviewerAgent` führt eine bedingte Prüfung im `balanced` / `strict`-Modus durch
+6. `ReviewerAgent` führt eine bedingte Prüfung im `balanced` / `quality`-Modus durch
 7. `MarkdownRenderer` ordnet die Übersetzungsergebnisse wieder dem AST zu und rendert sie als Markdown
 8. `MarkdownValidator` validiert Front Matter und die Gesamtstruktur
 9. Falls die Validierung fehlschlägt, versucht `FormatGuardAgent`, Formatierungsprobleme bei Bedarf zu korrigieren

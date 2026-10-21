@@ -23,21 +23,34 @@ Second paragraph for good measure.
 """
 
 
+def _payload_segments(payload: dict) -> list[tuple[str, str]]:
+    if "segs" in payload:
+        return [(str(item[0]), str(item[1])) for item in payload["segs"]]
+    if "sections" in payload:
+        return [(str(item[0]), str(item[1])) for section in payload["sections"] for item in section["segs"]]
+    return [(str(item["segment_id"]), str(item["text"])) for item in payload.get("segments", [])]
+
+
 def _fake_llm_response(user_prompt: str) -> str:
     payload = json.loads(user_prompt)
     task = payload.get("task")
+    if task == "brief":
+        return json.dumps(
+            {"s": "Integration brief", "tone": "technical", "aud": "developers", "g": [], "sec": []},
+            ensure_ascii=False,
+        )
     if task == "translate":
-        items = [
+        return json.dumps(
             {
-                "segment_id": segment["segment_id"],
-                "translated_text": f"[ZH]{segment['text']}",
-                "notes": [],
-                "applied_terms": {},
-                "confidence": 0.95,
-            }
-            for segment in payload["segments"]
-        ]
-    elif task == "reflect":
+                "t": [
+                    {"i": segment_id, "x": f"[ZH]{text}", "c": 0.95, "a": {}, "n": []}
+                    for segment_id, text in _payload_segments(payload)
+                ],
+                "q": [],
+            },
+            ensure_ascii=False,
+        )
+    if task == "reflect":
         return json.dumps({"issues": []})
     elif task == "judge":
         return json.dumps(
@@ -63,12 +76,17 @@ def _fake_llm_response(user_prompt: str) -> str:
 
 class _MockOpenAIHandler(BaseHTTPRequestHandler):
     received_formats: list[dict] = []
+    received_tasks: list[str] = []
 
     def do_POST(self) -> None:  # noqa: N802 - http.server API
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length))
         self.received_formats.append(body.get("response_format", {}))
         user_prompt = body["messages"][1]["content"]
+        try:
+            self.received_tasks.append(str(json.loads(user_prompt).get("task", "")))
+        except json.JSONDecodeError:
+            self.received_tasks.append("")
         try:
             content = _fake_llm_response(user_prompt)
         except Exception as exc:  # propagate as HTTP error for debugging
@@ -146,15 +164,12 @@ class RealClientIntegrationTests(unittest.TestCase):
             # cached tokens parsed from prompt_tokens_details.
             self.assertTrue(any(fmt == {"type": "json_object"} for fmt in formats) or formats)
 
-            # Second run: memory reuse means zero translate calls.
-            formats_before = len(_MockOpenAIHandler.received_formats)
+            # Second run: memory reuse means zero translate calls (the brief
+            # call still runs, because it is document-level context).
+            tasks_before = len(_MockOpenAIHandler.received_tasks)
             translate_command([str(input_path)], ["zh-CN"], config, output_dir=str(output_dir))
-            translate_calls_after = sum(
-                1
-                for fmt in _MockOpenAIHandler.received_formats[formats_before:]
-                if fmt.get("type") in {"json_schema", "json_object"}
-            )
-            self.assertEqual(translate_calls_after, 0)
+            tasks_after = _MockOpenAIHandler.received_tasks[tasks_before:]
+            self.assertEqual(tasks_after.count("translate"), 0)
 
 
 if __name__ == "__main__":

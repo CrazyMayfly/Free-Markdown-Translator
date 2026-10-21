@@ -14,7 +14,7 @@ AI Agent 流水线翻译 + AST 语法树校验：**格式稳定、语义连贯�
 | --- | --- |
 | 🈯️ 术语一致 | 译前抽取术语表、译后自动修正漂移译法；持久化术语库跨运行累积，人工条目优先于模型投票（API `/api/glossary` 可管理） |
 | 🔗 上下文连贯 | 分包对齐章节边界（表格不拆包）；每包携带文档大纲、术语表与前一包摘要；锚点调度为并行包注入真实已译文本；翻译模型可**主动请求更深的记忆检索**（拉取式上下文）；文内锚点链接自动跟随译后标题 |
-| ✅ 质量保障 | 反思式审校（批评 → 修复 → 复核）；零成本语义哨兵（占位符/数字守恒、长度比）拦截丢内容；strict 模式**文档级终审**（跨章节指代/衔接/语气漂移）；`--eval` LLM-as-judge 打分并把弱段移出记忆；`--regression` 黄金样例回归 |
+| ✅ 质量保障 | 反思式审校（批评 → 修复 → 复核）；零成本语义哨兵（占位符/数字守恒、长度比）拦截丢内容；quality 模式**文档级终审**（跨章节指代/衔接/语气漂移）；`--eval` LLM-as-judge 打分并把弱段移出记忆；`--regression` 黄金样例回归 |
 | 💰 成本效率 | 翻译记忆：相同段落零调用复用、相似段落模糊复用或作 few-shot 示例；`--resume` 断点续传；asyncio 并发 + 限流退避 |
 | 🧱 结构稳定 | Structured Outputs 受限解码（端点不支持自动降级）、截断精确识别；代码/URL/表格/标题占位符保护；校验失败自动格式修复 |
 | 🔌 灵活集成 | 任意 OpenAI 兼容端点（OpenRouter / DeepSeek / Ollama / vLLM…）；审校与评审可配置独立模型；`--serve` MCP 模式接入 AI 客户端；桌面应用 + Web UI |
@@ -106,7 +106,7 @@ python src/cli/main.py README.md --to english,japanese
 开启更严格的翻译和校验流程，消耗更多token，花费更多时间但是获取更好的翻译效果：
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 强制开启审校和格式保护：
@@ -280,11 +280,15 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 可选模型路由（留空 = provider.model）。
+  fast_model: ""
+  quality_model: ""
+  brief_model: ""
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
@@ -293,9 +297,9 @@ pipeline:
 # 预算单位是估算 token 而非字符：同样 6000 字符，中文约 4200 token、英文约 1800 token。
 segmentation:
   # 单个文本包的硬上限（估算源 token），也是超长块按行拆分的阈值。
-  max_bundle_tokens: 3000
+  max_bundle_tokens: 4000
   # 小章节/尾包合并到该 token 数为止；0 表示不合并。
-  min_bundle_tokens: 800
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -362,9 +366,9 @@ provider:
 7. **锚点-并行混合调度**：每章首个 bundle 先按文档顺序串行翻译，其余 bundle 并行执行并携带锚点 bundle 的真实已译文本
 8. `TranslatorAgent` 对每个 bundle 进行翻译（Structured Outputs 强约束输出格式，上下文含文档大纲、术语表、前一 bundle 摘要、锚点译文与相似段落示例）；模型对看不准的段落可返回 `context_requests`，管线做更深的记忆检索后重译一轮（拉取式上下文，fast 模式关闭）
 9. **确定性语义哨兵**：占位符/数字守恒与长度比检查，发现丢内容/幻觉即强制审校该 bundle 并记录到输出报告
-10. `ReviewerAgent` 反思式审校：先输出结构化批评意见，再仅对达到严重度阈值的段落做针对性改进并复核（`fast` 关闭 / `balanced` medium 及以上 / `strict` 全量；修复时携带相邻段落上下文）
+10. `ReviewerAgent` 反思式审校：先输出结构化批评意见，再仅对达到严重度阈值的段落做针对性改进并复核（`fast` 关闭 / `balanced` medium 及以上 / `quality` 全量；修复时携带相邻段落上下文）
 11. **术语一致性 pass**：聚合各 bundle 上报的 `applied_terms`，检测同一术语的译法漂移，按权威术语表自动改写受影响段落并回写持久化术语库
-12. **文档级终审**（`strict` 模式）：`EditorAgent` 以全文为审阅单元检查跨包话语流（指代悬空、衔接生硬、术语/语气漂移），仅修正被标记段落且携带文档序邻居上下文
+12. **文档级终审**（`quality` 模式）：`EditorAgent` 以全文为审阅单元检查跨包话语流（指代悬空、衔接生硬、术语/语气漂移），仅修正被标记段落且携带文档序邻居上下文
 13. `MarkdownRenderer` 将翻译结果重新映射回 AST 并渲染为 Markdown；文内 `](#锚点)` 链接自动改指译后标题
 14. `MarkdownValidator` 校验 front matter 和整体结构
 15. 如果校验失败，`FormatGuardAgent` 会并发尝试修复格式问题

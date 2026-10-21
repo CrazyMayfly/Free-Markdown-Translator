@@ -92,7 +92,7 @@ Augmenter le parallélisme pour accélérer les traductions en masse :
 Activer un processus de traduction et de validation plus strict, consommant plus de tokens et prenant plus de temps, mais offrant une meilleure qualité de traduction :
 
 ```bash
-.\mdtx.exe docs --to Chinese --mode strict
+.\mdtx.exe docs --to Chinese --mode quality
 ```
 
 Forcer l'activation de la révision et de la protection du format :
@@ -150,19 +150,19 @@ provider:
 
 # 翻译流程控制。
 pipeline:
-  # fast: 更快（不做review和guard）；balanced: 默认（按条件触发review和guard）；strict: 更严格（执行review和guard）。
+  # fast: 省 token/提速（不跑 LLM 审校/终审）；balanced: 默认（只审可疑包）；quality: 最高质量（全量审校 + 终审，strict 为兼容别名）。
   mode: balanced
-  # 强制开启审校 Agent。关闭时，balanced/strict 仍可能按条件触发审校。
+  # 强制开启审校 Agent。关闭时，balanced 只审可疑包，quality 全量审校。
   enable_review: false
-  # 强制开启格式修复 Agent。关闭时，balanced/strict 遇到校验失败仍可能触发修复。
+  # 强制开启格式修复 Agent。关闭时，balanced/quality 遇到校验失败仍可能触发修复。
   enable_format_guard: false
   # 输出校验失败时是否直接报错。
   fail_on_validation_error: true
 
 # 分段策略。先按 Markdown 结构（标题/列表/表格/引用）打包，超长块再按行拆分。
 segmentation:
-  max_bundle_tokens: 3000
-  min_bundle_tokens: 800
+  max_bundle_tokens: 4000
+  min_bundle_tokens: 1000
 
 # 输入规则。
 input:
@@ -227,7 +227,7 @@ Ce projet ne consiste pas à « donner tout le document Markdown au modèle pour
 3. `DocumentContextBuilder` Génère un résumé du document, des contraintes de style et un contexte terminologique
 4. `Orchestrator` Organise les segments en plusieurs bundles selon la configuration, contrôle la taille de chaque appel au modèle
 5. `TranslatorAgent` Traduit chaque bundle
-6. `ReviewerAgent` effectue une révision conditionnelle dans les modes `balanced` / `strict`
+6. `ReviewerAgent` effectue une révision conditionnelle dans les modes `balanced` / `quality`
 7. `MarkdownRenderer` remappe les résultats de traduction vers l'AST et les rend au format Markdown
 8. `MarkdownValidator` valide le front matter et la structure globale
 9. Si la validation échoue, `FormatGuardAgent` tentera de corriger les problèmes de formatage si nécessaire

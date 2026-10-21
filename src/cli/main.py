@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("paths", nargs="*", help="Markdown files or directories to translate.")
     parser.add_argument("--to", "-to", action="append", help="Target language(s), supports comma-separated values. Defaults to config.yaml.")
     parser.add_argument("-o", "--output", help="Output directory. Defaults to config.yaml output.directory.")
-    parser.add_argument("-m", "--mode", help="Pipeline mode. Defaults to config.yaml pipeline.mode.")
+    parser.add_argument("-m", "--mode", help="Pipeline mode: fast, balanced or quality (strict is an alias). Defaults to config.yaml pipeline.mode.")
     parser.add_argument("-t", "--threads", type=_parse_positive_int, help="Max parallel translations. Defaults to config.yaml execution.max_parallel_translations.")
     parser.add_argument("--match", help="Glob pattern for files under input directories. Defaults to config.yaml input.file_pattern.")
     parser.add_argument("--review", nargs="?", const=True, default=None, type=_parse_bool_arg, help="Enable or disable review agent. Defaults to config.yaml pipeline.enable_review.")

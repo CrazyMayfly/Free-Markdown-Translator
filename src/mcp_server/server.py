@@ -78,7 +78,7 @@ async def translate_markdown(
     Args:
         path: Markdown file to translate (absolute or workspace-relative).
         target_langs: Target language names or codes, e.g. ["chinese", "ja"].
-        mode: Pipeline mode "fast" | "balanced" | "strict" (default: config).
+        mode: Pipeline mode "fast" | "balanced" | "quality" (strict is a deprecated alias).
         tone: Style tone override, e.g. "technical".
         model: Model name override.
         write: Also write the translated .md file next to the source.
