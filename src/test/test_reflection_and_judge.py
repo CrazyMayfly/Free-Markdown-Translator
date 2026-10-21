@@ -186,7 +186,7 @@ class JudgeTests(unittest.TestCase):
         provider = FakeProvider()
 
         class FakePipeline:
-            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                 parsed_segments = SegmentExtractor().extract(MarkdownParser().parse(SAMPLE_MARKDOWN, Path(input_path), target_lang))
                 return SimpleNamespace(
                     segments=parsed_segments,

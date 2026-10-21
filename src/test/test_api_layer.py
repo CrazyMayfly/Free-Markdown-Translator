@@ -50,7 +50,7 @@ class FakeUiPipeline:
     def count_bundles(self, input_path, target_lang) -> int:
         return 2
 
-    async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+    async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
         self.calls.append((input_path, target_lang))
         for index in range(2):
             if self.delay:

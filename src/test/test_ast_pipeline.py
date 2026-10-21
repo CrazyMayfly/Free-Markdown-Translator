@@ -270,7 +270,7 @@ class AstAndPipelineTests(unittest.TestCase):
             self.config.execution.max_parallel_translations = 1
 
             class FakePipeline:
-                async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+                async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                     self.last_call = (input_path, target_lang, write_output, output_path)
                     if bundle_progress_callback is not None:
                         bundle_progress_callback(input_path, target_lang, "bundle-0")

@@ -36,7 +36,7 @@ class McpServerTests(unittest.TestCase):
             def count_bundles(self, input_path, target_lang) -> int:
                 return 1
 
-            async def run_async(self, input_path, target_lang, write_output=True, semaphore=None, bundle_progress_callback=None):
+            async def run_async(self, input_path, target_lang, write_output=True, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                 self.calls.append(target_lang)
                 if bundle_progress_callback is not None:
                     bundle_progress_callback(input_path, target_lang, "bundle-0")

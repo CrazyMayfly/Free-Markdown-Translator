@@ -188,7 +188,13 @@ class GlossaryStoreTests(unittest.TestCase):
 
             # Extraction result was persisted (model origin, does not clobber user rows).
             self.assertEqual(store.load("zh-CN")["agent"], "用户指定")
-            self.assertEqual(store.load("zh-CN")["cache"], "缓存")
+            # The model-extracted "cache" term starts pending (1 document seen),
+            # so it is persisted but not yet injected via load().
+            entries = {e["term"]: e for e in store.entries("zh-CN")}
+            self.assertEqual(entries["cache"]["rendering"], "缓存")
+            self.assertEqual(entries["cache"]["status"], "pending")
+            self.assertEqual(entries["cache"]["doc_count"], 1)
+            self.assertNotIn("cache", store.load("zh-CN"))
             # The runtime glossary honoured the user entry over the extraction.
             self.assertIsNotNone(result.context)
             assert result.context is not None
@@ -445,7 +451,7 @@ class JudgeFeedbackTests(unittest.TestCase):
             def __init__(self, memory) -> None:
                 self.memory = memory
 
-            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                 return SimpleNamespace(
                     segments=segments,
                     translations=[TranslationResult(segment_id=s.segment_id, translated_text=f"[ZH]{s.source_text}") for s in segments],
@@ -493,7 +499,7 @@ class RegressionCommandTests(unittest.TestCase):
         segments = SegmentExtractor().extract(MarkdownParser().parse("First golden source.\n\nSecond golden source.\n", Path("g.md"), "zh-CN"))
 
         class FakePipeline:
-            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+            async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                 return SimpleNamespace(
                     segments=segments,
                     translations=[TranslationResult(segment_id=s.segment_id, translated_text=f"[ZH]{s.source_text}") for s in segments],

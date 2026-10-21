@@ -108,8 +108,11 @@ class TranslationPipeline:
         output_path: Path | None = None,
         semaphore: asyncio.Semaphore | None = None,
         bundle_progress_callback: Callable[[Path, str, str], None] | None = None,
+        stage_callback: Callable[[str, str], None] | None = None,
     ) -> PipelineResult:
         logging.info("Pipeline: %s -> %s", input_path.name, target_lang)
+        if stage_callback:
+            stage_callback("parse", "解析与分块")
         source_text = input_path.read_text(encoding="utf-8")
         parsed = self.parser.parse(source_text, input_path, target_lang)
         segments = self.extractor.extract(parsed)
@@ -121,7 +124,11 @@ class TranslationPipeline:
         mode = self._normalized_mode()
         self._sentinel_findings = []
         resumed_bundles = self.checkpoint_store.load(input_path, target_lang) if self.checkpoint_store is not None else {}
+        if stage_callback:
+            stage_callback("brief", "生成文档摘要")
         context.brief = await self._build_brief(context, segments, target_lang, source_text)
+        if stage_callback:
+            stage_callback("glossary", "抽取术语表")
         context.glossary = await self._build_glossary(context, segments, fingerprint, target_lang, resumed_bundles)
         bundles = self.orchestrator.build_bundles(segments, context, self.config)
         # The bundler may split one oversized block into several segments that
@@ -134,6 +141,8 @@ class TranslationPipeline:
             logging.info("Resuming %s: %s/%s bundles already completed", input_path.name, len(resumed_bundles), len(bundles))
 
         segment_lookup = {segment.segment_id: segment for segment in segments}
+        if stage_callback:
+            stage_callback("translate", "翻译文本包")
         all_translations = await self._translate_bundles(
             bundles=bundles,
             context=context,
@@ -157,6 +166,9 @@ class TranslationPipeline:
                 max_segments=self.config.pipeline.final_edit_max_segments,
             )
         all_translations = self._restore_all(all_translations, segment_lookup)
+        self._record_term_appearances(all_translations, context, target_lang)
+        if stage_callback:
+            stage_callback("render", "渲染与写文件")
 
         output_text, validation, all_translations = self._render_and_validate(
             parsed=parsed,
@@ -464,6 +476,25 @@ class TranslationPipeline:
             if segment is not None:
                 item.translated_text = self.protected_span_processor.restore(item.translated_text, segment)
         return translations
+
+    def _record_term_appearances(self, translations: list[TranslationResult], context, target_lang: str) -> None:
+        """Count one document's occurrence of each term for the auto-glossary.
+
+        A term "appears in a document" if the model reported it in
+        ``applied_terms`` or it was in the document glossary. This drives the
+        pending -> active promotion (>= ACTIVATE_AFTER_DOCS distinct docs).
+        """
+        if self.glossary_store is None:
+            return
+        terms: set[str] = set()
+        for item in translations:
+            for term in (item.applied_terms or {}):
+                if term:
+                    terms.add(str(term).strip())
+        for term in getattr(context, "glossary", {}) or {}:
+            if term:
+                terms.add(str(term).strip())
+        self.glossary_store.record_appearance(target_lang, terms)
 
     @staticmethod
     def _is_anchor_bundle(index: int, bundle: SegmentBundle, bundles: list[SegmentBundle]) -> bool:

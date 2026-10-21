@@ -162,8 +162,23 @@ class GlossaryUpsertBody(BaseModel):
     rendering: str
 
 
+class GlossaryStatusBody(BaseModel):
+    lang: str
+    term: str
+    status: str
+
+
+API_VERSION = "3.1.0"
+
+# Capabilities advertised by this sidecar build. The UI checks these to
+# decide which status features to enable; a stale packaged sidecar that
+# lacks a flag (e.g. "stage-events") makes the UI show a repackage hint
+# instead of silently degrading to a less informative status page.
+SIDECAR_FEATURES = ("stage-events",)
+
+
 def create_app(memory: MemoryStore | None = None, config_loader=None, history: JobHistory | None = None) -> FastAPI:
-    app = FastAPI(title="mdtx", version="3.1.0")
+    app = FastAPI(title="mdtx", version=API_VERSION)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "tauri://localhost"],
@@ -177,8 +192,8 @@ def create_app(memory: MemoryStore | None = None, config_loader=None, history: J
     config_router = APIRouter(prefix="/api")
 
     @config_router.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health() -> dict[str, Any]:
+        return {"status": "ok", "version": API_VERSION, "features": list(SIDECAR_FEATURES)}
     jobs_router = APIRouter(prefix="/api/jobs")
     misc_router = APIRouter(prefix="/api")
 
@@ -442,6 +457,15 @@ def create_app(memory: MemoryStore | None = None, config_loader=None, history: J
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Unknown glossary entry: {term}")
         return {"lang": lang, "term": term, "deleted": True}
+
+    @misc_router.patch("/glossary/status")
+    def glossary_set_status(body: GlossaryStatusBody) -> dict[str, Any]:
+        store = _get_glossary_store(app)
+        if not hasattr(store, "set_status"):
+            raise HTTPException(status_code=501, detail="glossary status not supported")
+        if not store.set_status(body.lang, body.term, body.status):
+            raise HTTPException(status_code=404, detail=f"Unknown glossary entry: {body.term}")
+        return {"lang": body.lang, "term": body.term, "status": body.status}
 
     @misc_router.get("/memory/stats")
     def memory_stats() -> dict[str, Any]:

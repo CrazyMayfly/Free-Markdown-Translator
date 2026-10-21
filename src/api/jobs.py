@@ -243,6 +243,9 @@ class JobManager:
                 usage=dict(job.usage),
             )
 
+        def on_stage(phase: str, detail: str) -> None:
+            job.emit("stage", input=str(input_path), lang=target_lang, phase=phase, detail=detail)
+
         source = TranslationSource(input_path=input_path, relative_output_path=_resolve_relative_output_path(input_path))
         output_path = _build_task_output_path(source, target_lang, output_dir, config)
         job.emit("pair_start", input=str(input_path), lang=target_lang, index=index, bundles=total_bundles)
@@ -256,6 +259,7 @@ class JobManager:
                 output_path=output_path,
                 semaphore=semaphore,
                 bundle_progress_callback=on_bundle,
+                stage_callback=on_stage,
             )
         except OutputWriteError as exc:
             # Translation succeeded; only the file write failed. Surface the

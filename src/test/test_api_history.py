@@ -244,7 +244,7 @@ class SalvageTests(unittest.TestCase):
                     def count_bundles(self, input_path, target_lang) -> int:
                         return 1
 
-                    async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None):
+                    async def run_async(self, input_path, target_lang, write_output=True, output_path=None, semaphore=None, bundle_progress_callback=None, stage_callback=None):
                         raise OutputWriteError(
                             "写入输出文件失败: [Errno 30] Read-only file system",
                             output_text="[zh]完整译文",
