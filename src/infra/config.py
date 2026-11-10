@@ -449,6 +449,10 @@ def _filter_known_keys(section: dict[str, Any], config_type, section_name: str) 
 
 
 def load_config(config_path: str | None = None) -> TranslatorConfig:
+    if config_path:
+        explicit = Path(config_path).expanduser()
+        if not explicit.is_file():
+            raise FileNotFoundError(f"Config file does not exist: {config_path}")
     loaded_path = resolve_config_path(config_path)
     loaded: dict[str, Any] | None = None
     if loaded_path is not None:
