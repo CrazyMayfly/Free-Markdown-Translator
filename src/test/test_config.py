@@ -65,6 +65,38 @@ class ConfigPathTests(unittest.TestCase):
         rendered = yaml.safe_load(render_default_config_yaml())
         self.assertEqual(rendered, _default_config_dict())
 
+    def test_explicit_missing_config_path_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            home_dir = Path(tmp_dir)
+            missing = home_dir / "no-such-config.yaml"
+            with patch("src.infra.config.Path.home", return_value=home_dir), patch(
+                "src.infra.config._workspace_root", return_value=home_dir / "workspace"
+            ):
+                with self.assertRaises(FileNotFoundError) as ctx:
+                    load_config(str(missing))
+            self.assertIn(str(missing), str(ctx.exception))
+            self.assertFalse((home_dir / ".mdtx" / "config.yaml").exists())
+
+    def test_explicit_directory_config_path_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            home_dir = Path(tmp_dir)
+            with patch("src.infra.config.Path.home", return_value=home_dir), patch(
+                "src.infra.config._workspace_root", return_value=home_dir / "workspace"
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    load_config(tmp_dir)
+
+    def test_explicit_existing_config_path_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            home_dir = Path(tmp_dir)
+            config_file = home_dir / "custom.yaml"
+            config_file.write_text("provider:\n  model: custom-model\n", encoding="utf-8")
+            with patch("src.infra.config.Path.home", return_value=home_dir), patch(
+                "src.infra.config._workspace_root", return_value=home_dir / "workspace"
+            ):
+                config = load_config(str(config_file))
+            self.assertEqual(config.provider.model, "custom-model")
+
     def test_dataclass_defaults_match_default_dict(self) -> None:
         config = TranslatorConfig()
         self.assertEqual(config.target_languages, _default_config_dict()["target_languages"])
